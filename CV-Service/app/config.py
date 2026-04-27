@@ -29,35 +29,33 @@ class Settings(BaseSettings):
 
     # ── YOLO Model ────────────────────────────────────────────────────
     # Path to the trained YOLO weights file.
-    # Default: use the pre-trained YOLOv8m from Ultralytics (COCO classes).
-    # Replace with "models/best.pt" after training on custom glass data.
-    MODEL_PATH: str = "yolov8m.pt"
+    # Updated to use the custom glass panel model.
+    MODEL_PATH: str = "models/best.pt"
 
     # Target class names to filter from COCO detections.
     # When using the pre-trained model, we look for "window" as a proxy
     # for glass panels. After custom training, this becomes ["glass_panel"].
     TARGET_CLASSES: list[str] = ["glass_panel"]
 
-    # Set to True when using pre-trained COCO model (filters for "window" class)
-    USE_PRETRAINED_COCO: bool = True
+    # Set to False to use our custom trained model (glass_panel class)
+    USE_PRETRAINED_COCO: bool = False
     COCO_PROXY_CLASSES: list[str] = ["window", "glass"]
 
     # ── Inference Thresholds ──────────────────────────────────────────
     # Confidence threshold — lower than typical (0.5) because glass edges
     # are subtle, transparent, and produce softer activations.
-    # Use a very low threshold for untrained data to catch subtle glass edges
-    CONFIDENCE_THRESHOLD: float = 0.15
+    # Set very low (0.05) to catch all thin panels in your specific photos.
+    CONFIDENCE_THRESHOLD: float = 0.05
 
-    # NMS IoU threshold — prevents merging adjacent but distinct panels.
-    # 0.45 is a balanced value; lower = more aggressive suppression.
-    NMS_IOU_THRESHOLD: float = 0.45
+    # Lowered to 0.30 to prevent merging thin panels that are right next to each other.
+    NMS_IOU_THRESHOLD: float = 0.30
 
     # Maximum detections per image.
     # Construction facades can have 100+ panels; 300 gives headroom.
     MAX_DETECTIONS: int = 300
 
-    # Inference image size (pixels). Must match training imgsz.
-    INFERENCE_IMAGE_SIZE: int = 640
+    # Increased to 1024 to see thin glass panels much more clearly.
+    INFERENCE_IMAGE_SIZE: int = 1024
 
     # ── Upload Constraints ────────────────────────────────────────────
     ALLOWED_EXTENSIONS: set[str] = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
@@ -65,7 +63,7 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE_BYTES: int = 15 * 1024 * 1024  # 15 MB
 
     # ── Timeout ───────────────────────────────────────────────────────
-    INFERENCE_TIMEOUT_SECONDS: int = 30
+    INFERENCE_TIMEOUT_SECONDS: int = 60
 
     # ── AI Integrations ───────────────────────────────────────────────
     GEMINI_API_KEY: str | None = None

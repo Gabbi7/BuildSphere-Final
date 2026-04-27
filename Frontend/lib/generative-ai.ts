@@ -72,8 +72,8 @@ export const countGlassPanels = async (base64Image: string, mimeType: string) =>
 export const hybridGlassAudit = async (base64Image: string, mimeType: string, photoUri?: string) => {
   console.log('DEBUG: Hybrid AI Audit Commencing (Local YOLO + Gemini)');
   
-  // Use your local IP address (port 8000 for Python CV Service)
-  const API_URL = "http://192.168.0.69:8000/detect-panels";
+  // Use a stable tunnel URL for mobile-to-PC connection
+  const API_URL = "https://buildsphere-ai-audit.loca.lt/detect-panels";
 
   try {
     let count = 0;
@@ -96,13 +96,20 @@ export const hybridGlassAudit = async (base64Image: string, mimeType: string, ph
       type: mimeType,
     } as any);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds
+
     const cvResponse = await fetch(API_URL, {
       method: "POST",
       headers: {
         'Accept': 'application/json',
+        'bypass-tunnel-reminder': 'true'
       },
       body: formData,
+      signal: controller.signal
     });
+
+    clearTimeout(timeoutId);
 
     if (!cvResponse.ok) {
         const errText = await cvResponse.text();

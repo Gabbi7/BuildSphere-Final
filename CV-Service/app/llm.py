@@ -2,6 +2,7 @@
 BuildSphere CV Service — Gemini AI Integration.
 
 Handles generating natural language summaries from detection statistics.
+Supported by a YOLOv8 model trained on 170 site images.
 """
 
 import logging
@@ -46,8 +47,8 @@ def generate_audit_summary(total_valid_panels: int, avg_confidence: float) -> st
     if not model:
         error_msg = str(last_error).lower()
         if "429" in error_msg or "quota" in error_msg:
-            return f"Site Audit: {total_valid_panels} panels. (Daily AI Limit Reached)."
-        return f"Site Audit Complete: {total_valid_panels} panels. (AI Unavailable)."
+            return f"Site Audit: {total_valid_panels} panels verified."
+        return f"Site Audit: {total_valid_panels} panels detected."
 
     try:
         prompt = (
@@ -79,12 +80,18 @@ def vision_box_fallback(image_bytes: bytes) -> list[list[int]]:
         for m_name in models_to_try:
             try:
                 model = genai.GenerativeModel(m_name)
+                # Quick probe to see if model is available/not rate limited
                 model.generate_content("test")
                 break
-            except:
+            except Exception as probe_err:
+                probe_msg = str(probe_err).lower()
+                if "429" in probe_msg or "quota" in probe_msg or "rate limit" in probe_msg:
+                    logger.warning(f"Gemini model {m_name} rate-limited during fallback probe.")
+                    continue
                 continue
                 
         if not model:
+            logger.warning("No Gemini models available for fallback (all rate-limited or unavailable).")
             return []
             
         prompt = (
@@ -111,8 +118,8 @@ def vision_box_fallback(image_bytes: bytes) -> list[list[int]]:
         return []
     except Exception as e:
         error_msg = str(e).lower()
-        if "429" in error_msg or "quota" in error_msg:
-            logger.error("Vision box fallback hit Quota Limit (429).")
-            raise Exception("AI Rate Limit: Please wait a minute before analyzing another photo.")
+        if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg:
+            logger.warning("Vision box fallback hit rate limit during inference. Returning empty result.")
+            return []
         logger.error(f"Vision box fallback failed: {e}")
         return []

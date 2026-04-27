@@ -16,6 +16,14 @@ from ultralytics import YOLO
 from app.config import settings
 from app.models import Detection, DetectionResponse
 
+# ── False-positive filter thresholds ─────────────────────────────────
+# Glass is transparent/reflective → high colour variance across the crop.
+# Solid walls / columns are uniform → low variance.
+# Relaxed to 30 to catch glass panels that might be uniform in colour (e.g. tinted or clear sky).
+_MIN_COLOR_VARIANCE: float = 30.0
+# Minimum fraction of the image dimension a panel must cover to be real.
+_MIN_REL_SIZE: float = 0.005   # 0.5 % of image width or height
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,12 +123,15 @@ class GlassPanelDetector:
         import base64
         cv_img = np.array(image.convert('RGB'))
         cv_img = cv_img[:, :, ::-1].copy()  # RGB to BGR for OpenCV
+        # Keep an RGB copy for colour-variance analysis
+        rgb_arr = np.array(image.convert('RGB'))
 
         if results and len(results) > 0:
             result = results[0]  # Single image → single result
 
             if result.boxes is not None and len(result.boxes) > 0:
                 boxes = result.boxes
+                logger.info(f"🔍 YOLO Raw Detections: {len(boxes)} boxes found")
                 
                 # Extract all raw detections first to sort them
                 raw_detections = []
@@ -128,6 +139,8 @@ class GlassPanelDetector:
                     xyxy = boxes.xyxy[i].cpu().numpy()
                     confidence = float(boxes.conf[i].cpu().numpy())
                     class_id = int(boxes.cls[i].cpu().numpy())
+                    
+                    logger.info(f"📍 Raw Box {i}: Class={class_id}, Conf={confidence:.3f}, Path={xyxy}")
                     
                     class_name = (
                         result.names[class_id]
@@ -138,6 +151,16 @@ class GlassPanelDetector:
                     if settings.USE_PRETRAINED_COCO and class_id == 0:
                         # Skip 'person' class in COCO model
                         continue
+
+                    # ── Wall / column false-positive filter ──────────────
+                    # x1, y1, x2, y2 = map(int, xyxy)
+                    # if self._is_wall_or_column(rgb_arr, x1, y1, x2, y2,
+                    #                            original_width, original_height):
+                    #     logger.info(
+                    #         f"Rejected detection at [{x1},{y1},{x2},{y2}] "
+                    #         f"(conf={confidence:.2f}) — low colour variance (wall/column)"
+                    #     )
+                    #     continue
                         
                     raw_detections.append({
                         "xyxy": xyxy,
@@ -156,18 +179,9 @@ class GlassPanelDetector:
                     
                     x_min, y_min, x_max, y_max = map(int, xyxy)
                     
-                    # Heuristic for Class B (partial/obscured)
+                    # Simplified: Every detection is a glass panel for the audit
+                    class_name = "full_glass_panel"
                     is_class_b = False
-                    if class_name == "partial_or_obscured":
-                        is_class_b = True
-                    else:
-                        margin = 5
-                        if (x_min <= margin or y_min <= margin or 
-                            x_max >= original_width - margin or y_max >= original_height - margin):
-                            is_class_b = True
-                            class_name = "partial_or_obscured"
-                        else:
-                            class_name = "full_glass_panel"
                             
                     # Add to JSON detections list
                     detection = Detection(
@@ -185,7 +199,7 @@ class GlassPanelDetector:
                     if not is_class_b:
                         # Class A: Fully visible (GREEN)
                         valid_panel_count += 1
-                        color = (0, 255, 0) # BGR for Green
+                        color = (0, 0, 255) # BGR for PRO-RED
                         
                         overlay = cv_img.copy()
                         cv2.rectangle(overlay, (x_min, y_min), (x_max, y_max), color, -1)
@@ -198,8 +212,8 @@ class GlassPanelDetector:
                         cv2.putText(cv_img, label_text, (x_min + 5, y_min - 7), 
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                     else:
-                        # Class B: Partial/Obscured (RED)
-                        color = (0, 0, 255) # BGR for Red
+                        # Class B: Partial/Obscured (ORANGE/YELLOW)
+                        color = (0, 165, 255) # BGR for Orange
                         cv2.rectangle(cv_img, (x_min, y_min), (x_max, y_max), color, 2)
                         
                         label_text = "This part of the photo is not fully visible"
@@ -232,6 +246,46 @@ class GlassPanelDetector:
             nms_iou_threshold=settings.NMS_IOU_THRESHOLD,
         )
 
+
+    # ── Helper: wall / column false-positive filter ──────────────────
+    @staticmethod
+    def _is_wall_or_column(
+        rgb_arr: np.ndarray,
+        x1: int, y1: int, x2: int, y2: int,
+        img_w: int, img_h: int,
+    ) -> bool:
+        """
+        Return True if the detected region looks like a wall or column
+        rather than a glass panel.
+
+        Heuristics:
+        1. Colour variance — glass is transparent/reflective (high variance);
+           plain concrete/walls are uniform (low variance).
+        2. Minimum relative size — tiny slivers are not real panels.
+        """
+        # Guard: clamp coordinates
+        x1 = max(0, x1); y1 = max(0, y1)
+        x2 = min(img_w, x2); y2 = min(img_h, y2)
+
+        if x2 <= x1 or y2 <= y1:
+            return True  # degenerate box → reject
+
+        # Minimum size check
+        box_w = x2 - x1
+        box_h = y2 - y1
+        if box_w < img_w * _MIN_REL_SIZE or box_h < img_h * _MIN_REL_SIZE:
+            return True
+
+        # Colour variance check on the cropped region
+        crop = rgb_arr[y1:y2, x1:x2]  # shape (H, W, 3)
+        if crop.size == 0:
+            return True
+
+        # Use per-channel std-dev; average across R, G, B
+        variance = float(np.mean(np.std(crop.reshape(-1, 3).astype(np.float32), axis=0)))
+        logger.debug(f"  Box [{x1},{y1},{x2},{y2}] colour variance = {variance:.1f}")
+
+        return variance < _MIN_COLOR_VARIANCE
 
     def draw_fallback_boxes(self, image: Image.Image, gemini_boxes: list[list[int]], inference_ms: float) -> DetectionResponse:
         import cv2
@@ -286,7 +340,7 @@ class GlassPanelDetector:
 
             if not is_class_b:
                 valid_panel_count += 1
-                color = (0, 255, 0)
+                color = (0, 0, 255) # PRO-RED
                 overlay = cv_img.copy()
                 cv2.rectangle(overlay, (x_min, y_min), (x_max, y_max), color, -1)
                 cv2.addWeighted(overlay, 0.3, cv_img, 0.7, 0, cv_img)

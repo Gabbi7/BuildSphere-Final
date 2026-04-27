@@ -1,0 +1,4 @@
+Node Backend: cd Server/npm start
+Expo Frontend: cd Frontend && npx expo start -c
+YOLO Server: cd CV-Service && .\venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+Localtunnel: cd CV-Service && npx localtunnel --port 8000 --subdomain buildsphere-ai-audit
