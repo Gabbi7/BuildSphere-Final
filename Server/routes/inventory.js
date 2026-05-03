@@ -154,25 +154,13 @@ router.post('/:itemId/transaction', async (req, res) => {
       if (projectRes.rows.length > 0) {
         const proj = projectRes.rows[0];
         if (proj.project_in_charge_id) {
-          // Insert WARNING notification
-          await pool.query(
-            `INSERT INTO notifications (type, title, message, user_id, reference_url)
-             VALUES ($1, $2, $3, $4, $5)`,
-            [
-              'WARNING',
-              'Low Stock Alert',
-              `Item '${item.item_name}' in ${proj.project_name || 'Project'} is low (${refreshedItem.quantity} left).`,
-              proj.project_in_charge_id,
-              `/inventory/${item.project_id}`,
-            ]
-          );
-
+          // Phase 2: Use sendPushNotificationToUser (handles both Push and DB persistence)
           await sendPushNotificationToUser(
             proj.project_in_charge_id,
             'Low Stock Alert ⚠️',
-            `Item '${item.item_name}' is at ${refreshedItem.quantity} ${refreshedItem.unit || 'pcs'} (critical: ${refreshedItem.critical_level}).`,
+            `Item '${item.item_name}' in ${proj.project_name || 'Project'} is at ${refreshedItem.quantity} ${refreshedItem.unit || 'pcs'} (critical: ${refreshedItem.critical_level}).`,
             {
-              type: 'low_stock_warning',
+              type: 'WARNING', // Phase 2 Type
               screen: 'Inventory',
               project_id: String(item.project_id),
               item_id: String(itemId),
