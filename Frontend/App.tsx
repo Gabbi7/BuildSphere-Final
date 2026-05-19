@@ -1,15 +1,18 @@
 import './global.css';
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import HomeScreen from './screens/home/HomeScreen';
 import LoginScreen from './screens/auth/LoginScreen';
-import ForgotPasswordScreen from './screens/auth/ForgotPasswordScreen';
+import ForgotPasswordScreen, { PASSWORD_RESET_REDIRECT_URL } from './screens/auth/ForgotPasswordScreen';
+import ResetPasswordScreen from './screens/auth/ResetPasswordScreen';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { UserRole } from './constants/roles';
 import * as Notifications from 'expo-notifications';
+import * as Linking from 'expo-linking';
 import { API_URL } from './lib/api';
+import { supabase } from './lib/supabase';
 import { addNotificationListeners, registerForPushNotificationsAsync } from './lib/notifications';
 import { BuildSphereThemeProvider, useAppTheme } from './contexts/ThemeContext';
 
@@ -31,13 +34,79 @@ export interface UserInfo {
   role: UserRole;
 }
 
+type AuthScreen = 'login' | 'forgot' | 'reset';
+
+function isResetPasswordUrl(url: string) {
+  if (url.startsWith(PASSWORD_RESET_REDIRECT_URL)) return true;
+
+  const parsed = Linking.parse(url);
+  return parsed.hostname === 'reset-password' || parsed.path === 'reset-password';
+}
+
+function getDeepLinkParams(url: string) {
+  const params = new URLSearchParams();
+  const queryStart = url.indexOf('?');
+  const hashStart = url.indexOf('#');
+
+  const appendParams = (value: string) => {
+    new URLSearchParams(value).forEach((paramValue, key) => {
+      params.set(key, paramValue);
+    });
+  };
+
+  if (queryStart !== -1) {
+    appendParams(url.slice(queryStart + 1, hashStart === -1 ? undefined : hashStart));
+  }
+
+  if (hashStart !== -1) {
+    appendParams(url.slice(hashStart + 1));
+  }
+
+  return params;
+}
+
 function AppContent() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingNotificationData, setPendingNotificationData] = useState<Record<string, any> | null>(null);
-
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [authScreen, setAuthScreen] = useState<AuthScreen>('login');
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryError, setRecoveryError] = useState('');
   const { theme, isDark } = useAppTheme();
+
+  const handleRecoveryUrl = useCallback(async (url: string) => {
+    if (!isResetPasswordUrl(url)) return;
+
+    setAuthScreen('reset');
+    setRecoveryLoading(true);
+    setRecoveryError('');
+
+    try {
+      const params = getDeepLinkParams(url);
+      const code = params.get('code');
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+        return;
+      }
+
+      if (accessToken && refreshToken) {
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (error) throw error;
+        return;
+      }
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : 'Could not open password recovery link.');
+    } finally {
+      setRecoveryLoading(false);
+    }
+  }, []);
 
   // Restore session from storage
   useEffect(() => {
@@ -64,9 +133,20 @@ function AppContent() {
   };
 
   const handleLogout = async () => {
+    await supabase.auth.signOut();
     await AsyncStorage.removeItem('user');
     await AsyncStorage.removeItem('token');
     setUser(null);
+  };
+
+  const handleBackToLogin = async () => {
+    await supabase.auth.signOut();
+    await AsyncStorage.removeItem('user');
+    await AsyncStorage.removeItem('token');
+    setUser(null);
+    setAuthScreen('login');
+    setRecoveryLoading(false);
+    setRecoveryError('');
   };
 
   const handleUserUpdated = async (updated: UserInfo) => {
@@ -92,6 +172,30 @@ function AppContent() {
 
     return cleanup;
   }, []);
+
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setAuthScreen('reset');
+        setRecoveryLoading(false);
+        setRecoveryError('');
+      }
+    });
+
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    Linking.getInitialURL().then((url) => {
+      if (url) handleRecoveryUrl(url);
+    });
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      handleRecoveryUrl(url);
+    });
+
+    return () => subscription.remove();
+  }, [handleRecoveryUrl]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -128,6 +232,19 @@ function AppContent() {
     );
   }
 
+  if (authScreen === 'reset') {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <ResetPasswordScreen
+          recoveryLoading={recoveryLoading}
+          recoveryError={recoveryError}
+          onBackToLogin={handleBackToLogin}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
   if (user) {
     return (
       <SafeAreaProvider>
@@ -144,11 +261,11 @@ function AppContent() {
   }
 
 
-  if (showForgotPassword) {
+  if (authScreen === 'forgot') {
     return (
       <SafeAreaProvider>
         <StatusBar style={isDark ? 'light' : 'dark'} />
-        <ForgotPasswordScreen onBackToLogin={() => setShowForgotPassword(false)} />
+        <ForgotPasswordScreen onBackToLogin={() => setAuthScreen('login')} />
       </SafeAreaProvider>
     );
   }
@@ -156,7 +273,7 @@ function AppContent() {
   return (
     <SafeAreaProvider>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <LoginScreen onLogin={handleLogin} onForgotPassword={() => setShowForgotPassword(true)} />
+      <LoginScreen onLogin={handleLogin} onForgotPassword={() => setAuthScreen('forgot')} />
     </SafeAreaProvider>
   );
 }

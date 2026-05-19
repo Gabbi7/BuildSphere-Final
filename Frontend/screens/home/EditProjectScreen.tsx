@@ -10,6 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CustomDatePicker from '../../components/CustomDatePicker';
 import { API_URL } from '../../lib/api';
 
@@ -26,11 +27,7 @@ export default function EditProjectScreen({
   onClose,
   onProjectUpdated,
 }: EditProjectScreenProps) {
-  const PRESET_COLORS = [
-    '#7370FF', '#FF6B6B', '#4ECDC4', '#FFD93D',
-    '#6BCB77', '#4D96FF', '#F94892', '#A0A0A0',
-  ];
-
+  const insets = useSafeAreaInsets();
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   const [status, setStatus] = useState('');
@@ -38,7 +35,6 @@ export default function EditProjectScreen({
   const [endDate, setEndDate] = useState('');
   const [budget, setBudget] = useState('');
   const [description, setDescription] = useState('');
-  const [color, setColor] = useState('#FFDFF2');
   const [loading, setLoading] = useState(false);
   const [showStartDate, setShowStartDate] = useState(false);
   const [showEndDate, setShowEndDate] = useState(false);
@@ -52,7 +48,6 @@ export default function EditProjectScreen({
       setEndDate(project.end_date ? project.end_date.split('T')[0] : '');
       setBudget(project.budget_for_materials ? String(project.budget_for_materials) : '');
       setDescription(project.description || '');
-      setColor(project.color || '#FFDFF2');
     }
   }, [project, visible]);
 
@@ -75,7 +70,6 @@ export default function EditProjectScreen({
           end_date: endDate || null,
           budget_for_materials: budget ? parseFloat(budget) : null,
           description,
-          color,
         }),
       });
 
@@ -98,7 +92,9 @@ export default function EditProjectScreen({
     <Modal visible={visible} animationType="slide" transparent={false}>
       <View className="flex-1 bg-white">
         {/* Header */}
-        <View className="flex-row items-center justify-between border-b border-gray-100 px-5 py-4 pt-12">
+        <View
+          className="flex-row items-center justify-between border-b border-gray-100 px-5 pb-4"
+          style={{ paddingTop: Math.max(insets.top + 12, 56) }}>
           <TouchableOpacity onPress={onClose}>
             <Ionicons name="close" size={24} color="#1E1E1E" />
           </TouchableOpacity>
@@ -171,49 +167,6 @@ export default function EditProjectScreen({
                   </Text>
                 </TouchableOpacity>
               ))}
-            </View>
-          </View>
-
-          <View className="mb-6">
-            <Text className="mb-2 text-[14px] font-semibold text-[#1E1E1E]">Project Color</Text>
-            <View className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <View className="flex-row flex-wrap justify-between mb-4">
-                {PRESET_COLORS.map((c) => (
-                  <TouchableOpacity
-                    key={c}
-                    onPress={() => setColor(c)}
-                    style={{ backgroundColor: c }}
-                    className={`h-9 w-9 items-center justify-center rounded-full border-2 ${color === c ? 'border-gray-900' : 'border-transparent'}`}
-                  >
-                    {color === c && (
-                      <Ionicons name="checkmark" size={16} color="white" />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View className="flex-row items-center border-t border-gray-200 pt-4">
-                <Text className="mr-3 font-semibold text-gray-400">HEX</Text>
-                <TextInput
-                  className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-[14px] font-medium text-gray-700"
-                  placeholder="#7370FF"
-                  value={color}
-                  onChangeText={(val) => {
-                    // Allow typing # and valid hex characters
-                    const clean = val.replace(/[^#0-9A-Fa-f]/g, '').slice(0, 7);
-                    setColor(clean.toUpperCase());
-                  }}
-                  onBlur={() => {
-                    if (!/^#[0-9A-Fa-f]{6}$/i.test(color)) {
-                      setColor('#7370FF'); // Fallback to default if invalid
-                    }
-                  }}
-                  autoCapitalize="characters"
-                />
-                <View 
-                  className="ml-3 h-8 w-8 rounded-lg border border-gray-200"
-                  style={{ backgroundColor: /^#[0-9A-Fa-f]{6}$/i.test(color) ? color : '#7370FF' }}
-                />
-              </View>
             </View>
           </View>
 

@@ -13,6 +13,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { API_URL } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 import { UserInfo } from '../../App';
 import { useAppTheme } from '../../contexts/ThemeContext';
 
@@ -39,21 +40,51 @@ export default function LoginScreen({
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+      const trimmedEmail = email.trim();
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        Alert.alert('Login Failed', data.error || 'Something went wrong.');
+
+      if (!authError && authData.session) {
+        const profileRes = await fetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`);
+        const profileData = await profileRes.json();
+
+        if (!profileRes.ok) {
+          await supabase.auth.signOut();
+          Alert.alert('Login Failed', profileData.error || 'No app profile is linked to this Supabase account.');
+          return;
+        }
+
+        onLogin(profileData, authData.session.access_token);
         return;
       }
-      onLogin(data.user, data.token);
+
+      if (authError?.message?.toLowerCase().includes('api key')) {
+        const message = authError?.message?.toLowerCase().includes('api key')
+          ? 'Supabase is rejecting the app API key. Check EXPO_PUBLIC_SUPABASE_KEY in Frontend/.env and restart Expo with cache cleared.'
+          : authError?.message || 'Invalid email or password.';
+        Alert.alert('Login Failed', message);
+        return;
+      }
+
+      const legacyRes = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: trimmedEmail, password }),
+      });
+      const legacyData = await legacyRes.json();
+
+      if (!legacyRes.ok) {
+        Alert.alert('Login Failed', legacyData.error || authError?.message || 'Invalid email or password.');
+        return;
+      }
+
+      onLogin(legacyData.user, legacyData.token);
     } catch (err) {
       Alert.alert(
         'Connection Error',
-        'Could not reach the server. Make sure the backend is running.'
+        'Could not complete login. Make sure the backend is running.'
       );
     } finally {
       setLoading(false);

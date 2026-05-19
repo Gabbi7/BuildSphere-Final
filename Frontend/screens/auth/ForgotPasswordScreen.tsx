@@ -12,21 +12,24 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import { API_URL } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface ForgotPasswordScreenProps {
   onBackToLogin: () => void;
 }
 
+// Supabase Dashboard > Authentication > URL Configuration > Redirect URLs
+// must include this exact URL for password recovery links to open the app.
+export const PASSWORD_RESET_REDIRECT_URL = 'buildsphere://reset-password';
+const GENERIC_SUCCESS_MESSAGE = 'If this email exists, a password reset link has been sent.';
+
 export default function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProps) {
   const { theme, isDark } = useAppTheme();
-  const [step, setStep] = useState<'email' | 'otp' | 'password'>('email');
   const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
   const inputBoxStyle = {
     shadowColor: theme.primary,
@@ -38,62 +41,38 @@ export default function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordSc
     borderColor: theme.border,
   } as const;
 
-  const handleRequestOTP = async () => {
-    if (!email.trim()) return Alert.alert('Error', 'Please enter your email.');
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/auth/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json();
-      if (res.ok) setStep('otp');
-      else Alert.alert('Error', data.error || 'Failed to request OTP');
-    } catch {
-      Alert.alert('Error', 'Could not connect to server.');
-    } finally {
-      setLoading(false);
+  const handleSendResetLink = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      Alert.alert('Missing email', 'Please enter your email.');
+      return;
     }
-  };
 
-  const handleVerifyOTP = async () => {
-    if (!otp.trim()) return Alert.alert('Error', 'Please enter the 6-digit OTP.');
     setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/auth/verify-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otp }),
-      });
-      const data = await res.json();
-      if (res.ok) setStep('password');
-      else Alert.alert('Error', data.error || 'Invalid or expired OTP');
-    } catch {
-      Alert.alert('Error', 'Could not connect to server.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    setErrorMessage('');
+    setSuccessMessage('');
 
-  const handleResetPassword = async () => {
-    if (newPassword !== confirmPassword) return Alert.alert('Error', 'Passwords do not match.');
-    if (newPassword.length < 6) return Alert.alert('Error', 'Password must be at least 6 characters.');
-    setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/auth/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otp, newPassword }),
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+        redirectTo: PASSWORD_RESET_REDIRECT_URL,
       });
-      const data = await res.json();
-      if (res.ok) {
-        Alert.alert('Success', 'Password has been reset successfully!', [{ text: 'OK', onPress: onBackToLogin }]);
-      } else {
-        Alert.alert('Error', data.error || 'Failed to reset password');
+
+      if (error) {
+        const isRateLimited =
+          error.status === 429 ||
+          error.code === 'over_email_send_rate_limit' ||
+          error.message.toLowerCase().includes('rate limit');
+        setErrorMessage(
+          isRateLimited
+            ? 'Too many reset emails were requested. Please wait a few minutes, then try again.'
+            : 'Could not send reset link. Please try again.'
+        );
+        return;
       }
-    } catch {
-      Alert.alert('Error', 'Could not connect to server.');
+
+      setSuccessMessage(GENERIC_SUCCESS_MESSAGE);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not send reset link.');
     } finally {
       setLoading(false);
     }
@@ -111,13 +90,22 @@ export default function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordSc
 
         <KeyboardAwareScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 40 }}
-          enableOnAndroid extraScrollHeight={18} keyboardOpeningTime={220} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          
+          contentContainerStyle={{
+            flexGrow: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+            paddingHorizontal: 24,
+            paddingVertical: 40,
+          }}
+          enableOnAndroid
+          extraScrollHeight={18}
+          keyboardOpeningTime={220}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
           <View className="w-full max-w-[360px] items-center">
             <Image source={require('../../assets/Buildspherelogo4x.png')} style={{ width: 56, height: 56 }} resizeMode="contain" />
-            <Text className="mt-5 text-[22px] font-bold" style={{ color: theme.text }}>Reset Password</Text>
-            
+            <Text className="mt-5 text-[22px] font-bold" style={{ color: theme.text }}>Forgot Password</Text>
+
             <View className="mt-2 flex-row items-center">
               <Text className="text-[12.5px]" style={{ color: theme.textMuted }}>Remember your password? </Text>
               <TouchableOpacity onPress={onBackToLogin} activeOpacity={0.8}>
@@ -126,45 +114,45 @@ export default function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordSc
             </View>
 
             <View className="mt-10 w-full">
-              {step === 'email' && (
-                <>
-                  <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Email</Text>
-                  <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
-                    <TextInput value={email} onChangeText={setEmail} placeholder="Enter your email" placeholderTextColor={theme.textMuted} autoCapitalize="none" keyboardType="email-address" className="h-[52px] px-4" style={{ color: theme.text }} />
-                  </View>
-                  <TouchableOpacity onPress={handleRequestOTP} disabled={loading} className="mt-10 h-[52px] items-center justify-center rounded-xl shadow-lg" style={{ backgroundColor: theme.primary }}>
-                    {loading ? <ActivityIndicator color="white" /> : <Text className="text-[15px] font-semibold text-white">Send Reset OTP</Text>}
-                  </TouchableOpacity>
-                </>
-              )}
+              <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Email</Text>
+              <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
+                <TextInput
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="Enter your email"
+                  placeholderTextColor={theme.textMuted}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  className="h-[52px] px-4"
+                  style={{ color: theme.text }}
+                />
+              </View>
 
-              {step === 'otp' && (
-                <>
-                  <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Enter 6-digit OTP</Text>
-                  <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
-                    <TextInput value={otp} onChangeText={setOtp} placeholder="123456" placeholderTextColor={theme.textMuted} keyboardType="number-pad" maxLength={6} className="h-[52px] px-4 text-center text-lg tracking-widest" style={{ color: theme.text }} />
-                  </View>
-                  <TouchableOpacity onPress={handleVerifyOTP} disabled={loading} className="mt-10 h-[52px] items-center justify-center rounded-xl shadow-lg" style={{ backgroundColor: theme.primary }}>
-                    {loading ? <ActivityIndicator color="white" /> : <Text className="text-[15px] font-semibold text-white">Verify OTP</Text>}
-                  </TouchableOpacity>
-                </>
-              )}
+              {successMessage ? (
+                <Text className="mt-5 text-center text-[13px] leading-5" style={{ color: theme.textSecondary }}>
+                  {successMessage}
+                </Text>
+              ) : null}
 
-              {step === 'password' && (
-                <>
-                  <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>New Password</Text>
-                  <View className="rounded-xl mb-4" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
-                    <TextInput value={newPassword} onChangeText={setNewPassword} placeholder="Enter new password" placeholderTextColor={theme.textMuted} secureTextEntry className="h-[52px] px-4" style={{ color: theme.text }} />
-                  </View>
-                  <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Confirm Password</Text>
-                  <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
-                    <TextInput value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Confirm new password" placeholderTextColor={theme.textMuted} secureTextEntry className="h-[52px] px-4" style={{ color: theme.text }} />
-                  </View>
-                  <TouchableOpacity onPress={handleResetPassword} disabled={loading} className="mt-10 h-[52px] items-center justify-center rounded-xl shadow-lg" style={{ backgroundColor: theme.primary }}>
-                    {loading ? <ActivityIndicator color="white" /> : <Text className="text-[15px] font-semibold text-white">Update Password</Text>}
-                  </TouchableOpacity>
-                </>
-              )}
+              {errorMessage ? (
+                <Text className="mt-5 text-center text-[13px] leading-5" style={{ color: '#DC2626' }}>
+                  {errorMessage}
+                </Text>
+              ) : null}
+
+              <TouchableOpacity
+                onPress={handleSendResetLink}
+                disabled={loading}
+                className="mt-10 h-[52px] items-center justify-center rounded-xl shadow-lg"
+                style={{ backgroundColor: theme.primary }}>
+                {loading ? <ActivityIndicator color="white" /> : <Text className="text-[15px] font-semibold text-white">Send Reset Link</Text>}
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={onBackToLogin} disabled={loading} className="mt-6 self-center">
+                <Text className="text-[12px] font-semibold" style={{ color: theme.textMuted }}>
+                  Back to Login
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </KeyboardAwareScrollView>

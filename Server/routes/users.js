@@ -16,7 +16,10 @@ async function ensureUserProfileColumns() {
       ADD COLUMN IF NOT EXISTS address TEXT,
       ADD COLUMN IF NOT EXISTS department VARCHAR(120),
       ADD COLUMN IF NOT EXISTS position VARCHAR(120),
-      ADD COLUMN IF NOT EXISTS account_status VARCHAR(30) DEFAULT 'active'
+      ADD COLUMN IF NOT EXISTS account_status VARCHAR(30) DEFAULT 'active',
+      ADD COLUMN IF NOT EXISTS profile_picture_url TEXT,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
   `);
   userProfileSchemaReady = true;
 }
@@ -36,6 +39,62 @@ router.get('/', async (req, res) => {
     );
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch users.' });
+  }
+});
+
+// GET /users/by-email/:email - fetch app profile for a Supabase Auth user
+router.get('/by-email/:email', async (req, res) => {
+  try {
+    await ensureUserProfileColumns();
+    const result = await pool.query(
+      `SELECT
+        id,
+        first_name,
+        middle_name,
+        last_name,
+        suffix,
+        email,
+        role,
+        phone_number,
+        gender,
+        birthdate,
+        address,
+        department,
+        position,
+        account_status,
+        profile_picture_url,
+        created_at,
+        updated_at
+      FROM users
+      WHERE LOWER(email) = LOWER($1)`,
+      [req.params.email]
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User profile not found.' });
+
+    const user = result.rows[0];
+    res.json({
+      id: user.id,
+      firstName: user.first_name,
+      middleName: user.middle_name,
+      lastName: user.last_name,
+      suffix: user.suffix,
+      email: user.email,
+      role: user.role || 'staff',
+      phoneNumber: user.phone_number,
+      gender: user.gender,
+      birthdate: user.birthdate,
+      address: user.address,
+      department: user.department,
+      position: user.position,
+      accountStatus: user.account_status,
+      profilePictureUrl: user.profile_picture_url,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error.' });
   }
 });
 
