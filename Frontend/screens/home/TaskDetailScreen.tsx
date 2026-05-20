@@ -14,9 +14,11 @@ import {
 } from 'react-native';
 
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getPermissions, type UserRole } from '../../constants/roles';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
 
 
 interface TaskDetailScreenProps {
@@ -25,7 +27,9 @@ interface TaskDetailScreenProps {
   onClose: () => void;
   userRole?: UserRole;
   onViewInventory?: (projectId: number) => void;
-  onNavigate?: (tab: 'home' | 'mywork' | 'notifications' | 'more') => void;
+  onNavigate?: (tab: MainTab) => void;
+  canViewHome?: boolean;
+  unreadCount?: number;
   onAddProgress?: (task: any) => void;
   onAddTask?: () => void;
 }
@@ -49,10 +53,13 @@ export default function TaskDetailScreen({
   userRole,
   onViewInventory,
   onNavigate,
+  canViewHome = true,
+  unreadCount = 0,
   onAddProgress,
   onAddTask
 }: TaskDetailScreenProps) {
   const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const [history, setHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -131,6 +138,23 @@ export default function TaskDetailScreen({
     ...(perms.canEditInventory ? [{ label: 'Update inventory', icon: 'cube-outline', key: 'inventory' }] : []),
     ...(perms.canSubmitSiteUpdates ? [{ label: 'Upload Site Progress', icon: 'cloud-upload-outline', key: 'site' }] : []),
   ];
+  const fabBottom = Math.max(insets.bottom + 90, 110);
+  const fabMenuBottom = Math.max(insets.bottom + 140, 160);
+
+  const handleInventoryPress = () => {
+    const projectId = Number(task.project_id || task.projectId);
+    if (!Number.isFinite(projectId) || projectId <= 0) {
+      Alert.alert('Inventory unavailable', 'This task is not linked to a project inventory yet.');
+      return;
+    }
+
+    if (!perms.canViewInventory) {
+      Alert.alert('Access limited', 'Your role does not have permission to view project inventory.');
+      return;
+    }
+
+    onViewInventory?.(projectId);
+  };
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false}>
@@ -352,22 +376,22 @@ export default function TaskDetailScreen({
 
 
 
-          {/* RBAC: Audit Inventory Link for Accounting/Engr */}
-          {perms.canViewInventory && (
-            <View className="mb-8">
-              <Text className="mb-4 text-[18px] font-bold" style={{ color: theme.text }}>Project Oversight</Text>
-              <TouchableOpacity
-                onPress={() => onViewInventory && onViewInventory(task.project_id)}
-                className="h-[60px] w-full flex-row items-center justify-center rounded-[16px]"
-                style={{ backgroundColor: theme.primary }}>
-                <Ionicons name="cube-outline" size={24} color="white" />
-                <Text className="ml-3 font-bold text-white">Audit Project Inventory</Text>
-              </TouchableOpacity>
-              <Text className="mt-2 text-center text-[12px] italic" style={{ color: theme.textMuted }}>
-                Verification access for project materials & budgets.
-              </Text>
-            </View>
-          )}
+          <View className="mb-8">
+            <Text className="mb-4 text-[18px] font-bold" style={{ color: theme.text }}>Project Oversight</Text>
+            <TouchableOpacity
+              onPress={handleInventoryPress}
+              disabled={!perms.canViewInventory}
+              className="h-[60px] w-full flex-row items-center justify-center rounded-[16px]"
+              style={{ backgroundColor: perms.canViewInventory ? theme.primary : theme.textMuted }}>
+              <Ionicons name="cube-outline" size={24} color="white" />
+              <Text className="ml-3 font-bold text-white">Audit Project Inventory</Text>
+            </TouchableOpacity>
+            <Text className="mt-2 text-center text-[12px] italic" style={{ color: theme.textMuted }}>
+              {perms.canViewInventory
+                ? 'Verification access for project materials & budgets.'
+                : 'Your role does not have inventory audit access.'}
+            </Text>
+          </View>
 
           {/* Comments Section */}
           <View className="mb-10 rounded-[24px] border p-6" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
@@ -398,37 +422,12 @@ export default function TaskDetailScreen({
           </View>
         </ScrollView>
 
-        {/* Bottom Navigation Mimic */}
-        <View className="h-[90px] flex-row items-center justify-between border-t px-10 pb-4" style={{ borderTopColor: theme.border }}>
-          {perms.canViewDashboard && (
-            <TouchableOpacity
-              onPress={() => onNavigate && onNavigate('home')}
-              className="items-center">
-              <Ionicons name="home-outline" size={24} color={theme.textMuted} />
-              <Text className="mt-1 text-[10px]" style={{ color: theme.textMuted }}>Home</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            onPress={() => onNavigate && onNavigate('mywork')}
-            className="items-center">
-            <View className="mb-1 h-12 w-12 items-center justify-center rounded-2xl" style={{ backgroundColor: theme.input }}>
-              <Ionicons name="briefcase" size={24} color={theme.primary} />
-            </View>
-            <Text className="text-[10px] font-bold" style={{ color: theme.primary }}>Task</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => onNavigate && onNavigate('notifications')}
-            className="items-center">
-            <Ionicons name="notifications-outline" size={24} color={theme.textMuted} />
-            <Text className="mt-1 text-[10px]" style={{ color: theme.textMuted }}>Notifications</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => onNavigate && onNavigate('more')}
-            className="items-center">
-            <Ionicons name="ellipsis-horizontal-outline" size={24} color={theme.textMuted} />
-            <Text className="mt-1 text-[10px]" style={{ color: theme.textMuted }}>More</Text>
-          </TouchableOpacity>
-        </View>
+        <BottomNavigationBar
+          activeTab="mywork"
+          onTabPress={(tab) => onNavigate?.(tab)}
+          canViewHome={canViewHome}
+          unreadCount={unreadCount}
+        />
 
         {/* FAB Backdrop */}
         {fabOpen && (
@@ -442,7 +441,7 @@ export default function TaskDetailScreen({
 
         {/* FAB Menu Items */}
         {fabOpen && (
-          <View className="absolute bottom-[160px] right-5 items-end z-30">
+          <View className="absolute right-5 items-end z-30" style={{ bottom: fabMenuBottom }}>
             {FAB_ACTIONS.map((action, index) => (
               <Animated.View
                 key={action.label}
@@ -462,7 +461,7 @@ export default function TaskDetailScreen({
                   onPress={() => {
                     toggleFab();
                     if (action.key === 'site' && onAddProgress) onAddProgress(task);
-                    if (action.key === 'inventory' && onViewInventory) onViewInventory(task.project_id);
+                    if (action.key === 'inventory') handleInventoryPress();
                     if (action.key === 'task' && onAddTask) onAddTask();
                   }}
                   className="flex-row items-center rounded-[14px] px-4 py-3"
@@ -493,7 +492,7 @@ export default function TaskDetailScreen({
             style={{
               position: 'absolute',
               right: 20,
-              bottom: 110, // Just above the bottom nav mimic
+              bottom: fabBottom,
               backgroundColor: theme.primary,
               width: 56,
               height: 56,

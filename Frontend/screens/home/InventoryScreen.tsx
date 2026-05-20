@@ -16,6 +16,7 @@ import { API_URL } from '../../lib/api';
 import { getPermissions, type UserRole } from '../../constants/roles';
 import { ACTION_TYPES, ACTION_TYPE_LABELS, ACTION_TYPE_COLORS, type ActionType } from '../../constants/constants';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
 
 interface InventoryItem {
   id: number;
@@ -47,6 +48,11 @@ interface Props {
   userId: number;
   onBack: () => void;
   userRole?: UserRole;
+  activeMainTab?: MainTab;
+  canViewHome?: boolean;
+  unreadCount?: number;
+  onNavigate?: (tab: MainTab) => void;
+  showBottomNav?: boolean;
 }
 
 function stockStatus(qty: number | string, critical: number | string): { label: string; bg: string } {
@@ -78,7 +84,17 @@ const MOBILE_ACTION_TYPES = ACTION_TYPES.filter(
   (action) => action !== 'ADJUSTMENT'
 ) as Exclude<ActionType, 'ADJUSTMENT'>[];
 
-export default function InventoryScreen({ projectId, userId, onBack, userRole }: Props) {
+export default function InventoryScreen({
+  projectId,
+  userId,
+  onBack,
+  userRole,
+  activeMainTab = 'home',
+  canViewHome = true,
+  unreadCount = 0,
+  onNavigate,
+  showBottomNav = false,
+}: Props) {
   const perms = getPermissions(userRole);
   const canEdit = perms.canEditInventory;
   const canAdd = perms.canAddInventory;
@@ -468,7 +484,7 @@ export default function InventoryScreen({ projectId, userId, onBack, userRole }:
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: 110 }} className="px-5">
+        <ScrollView contentContainerStyle={{ paddingBottom: showBottomNav ? 150 : 110 }} className="px-5">
           <TouchableOpacity onPress={refresh} className="mb-2 self-end rounded-md px-3 py-1" style={{ backgroundColor: theme.primaryLight }}>
             <Text className="text-[12px]" style={{ color: theme.primary }}>{refreshing ? 'Refreshing...' : 'Refresh'}</Text>
           </TouchableOpacity>
@@ -750,6 +766,14 @@ export default function InventoryScreen({ projectId, userId, onBack, userRole }:
             </View>
           </View>
         </Modal>
+      {showBottomNav && onNavigate && (
+        <BottomNavigationBar
+          activeTab={activeMainTab}
+          onTabPress={onNavigate}
+          canViewHome={canViewHome}
+          unreadCount={unreadCount}
+        />
+      )}
     </View>
   );
 }

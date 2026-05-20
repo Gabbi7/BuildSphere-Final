@@ -11,7 +11,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import ProjectCard from './ProjectCard';
@@ -24,13 +24,14 @@ import AddTaskScreen from './AddTaskScreen';
 import TaskDetailScreen from './TaskDetailScreen';
 import InventoryScreen from './InventoryScreen';
 import EditProjectScreen from './EditProjectScreen';
+import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
 import { API_URL } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import ChangeProjectColorModal from '../../components/ChangeProjectColorModal';
 import { UserInfo } from '../../App';
 import { getPermissions } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import { floatingNavShadow, softCardShadow } from '../../constants/theme';
+import { softCardShadow } from '../../constants/theme';
 
 interface HomeScreenProps {
   onLogout: () => void;
@@ -59,7 +60,7 @@ export default function HomeScreen({
   notificationData,
   onNotificationHandled,
 }: HomeScreenProps) {
-  const [activeTab, setActiveTab] = useState<'home' | 'mywork' | 'notifications' | 'more'>('home');
+  const [activeTab, setActiveTab] = useState<MainTab>('home');
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [user, setUser] = useState<UserInfo>(initialUser);
@@ -78,6 +79,9 @@ export default function HomeScreen({
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [showChangeColor, setShowChangeColor] = useState(false);
   const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const fabBottom = Math.max(insets.bottom + 90, 110);
+  const fabMenuBottom = Math.max(insets.bottom + 140, 160);
 
   // RBAC: Filtered FAB Actions 
   const perms = useMemo(() => getPermissions(user.role), [user.role]);
@@ -200,6 +204,29 @@ export default function HomeScreen({
     setShowInventory(true);
   };
 
+  const handleMainTabPress = (tab: MainTab) => {
+    if (tab === 'home' && !perms.canViewDashboard) {
+      setActiveTab('mywork');
+      return;
+    }
+
+    setSelectedProjectId(null);
+    setSelectedTask(null);
+    setShowInventory(false);
+    setShowSiteProgress(false);
+    setShowAddTask(false);
+    setPrefilledTask(null);
+    setActiveTab(tab);
+
+    if (tab === 'notifications') {
+      if (unreadCount > 0) {
+        fetch(`${API_URL}/notifications/read-all?userId=${user.id}`, { method: 'PATCH' })
+          .catch((err) => console.error('Batch read error:', err));
+      }
+      setUnreadCount(0);
+    }
+  };
+
   const fetchProjects = () => {
     setLoadingProjects(true);
     setProjectsError(null);
@@ -285,10 +312,13 @@ export default function HomeScreen({
                 projectId={selectedProjectId}
                 userRole={user.role}
                 userId={user.id}
+                canViewHome={perms.canViewDashboard}
+                unreadCount={unreadCount}
                 onBack={() => {
                   setSelectedProjectId(null);
                   fetchProjects();
                 }}
+                onNavigate={handleMainTabPress}
               />
             ) : (
               <ScrollView
@@ -388,7 +418,7 @@ export default function HomeScreen({
 
         {/* FAB Actions (Strictly filtered by RBAC) */}
         {fabOpen && (
-          <View className="absolute bottom-[160px] right-5 items-end">
+          <View className="absolute right-5 items-end" style={{ bottom: fabMenuBottom }}>
             {FAB_ACTIONS.map((action, index) => (
               <Animated.View
                 key={action.label}
@@ -446,8 +476,9 @@ export default function HomeScreen({
         {showFab && (
           <TouchableOpacity
             onPress={toggleFab}
-            className="absolute bottom-[110px] right-5 h-14 w-14 items-center justify-center rounded-full"
+            className="absolute right-5 h-14 w-14 items-center justify-center rounded-full"
             style={{
+              bottom: fabBottom,
               backgroundColor: theme.primary,
               shadowColor: theme.primary,
               shadowOpacity: 0.5,
@@ -471,86 +502,12 @@ export default function HomeScreen({
           </TouchableOpacity>
         )}
 
-        {/* BOTTOM NAVIGATION */}
-        <View
-          className="absolute bottom-8 left-5 right-5 h-[70px] flex-row items-center justify-between rounded-[30px] px-6"
-          style={{ backgroundColor: theme.tabBar, ...floatingNavShadow }}>
-          {perms.canViewDashboard && (
-            <TouchableOpacity
-              className="items-center rounded-full p-2 px-4"
-              style={{ backgroundColor: activeTab === 'home' ? theme.primaryLight : 'transparent' }}
-              onPress={() => setActiveTab('home')}>
-              <Ionicons name="home" size={24} color={activeTab === 'home' ? theme.primary : theme.textMuted} />
-              <Text
-                className={`mt-1 text-[10px] ${activeTab === 'home' ? 'font-bold' : ''}`}
-                style={{ color: activeTab === 'home' ? theme.primary : theme.textMuted }}>
-                Home
-              </Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            className="items-center rounded-full p-2 px-4"
-            style={{ backgroundColor: activeTab === 'mywork' ? theme.primaryLight : 'transparent' }}
-            onPress={() => setActiveTab('mywork')}>
-            <Ionicons
-              name="briefcase-outline"
-              size={24}
-              color={activeTab === 'mywork' ? theme.primary : theme.textMuted}
-            />
-            <Text
-              className={`mt-1 text-[10px] ${activeTab === 'mywork' ? 'font-bold' : ''}`}
-              style={{ color: activeTab === 'mywork' ? theme.primary : theme.textMuted }}>
-              Task
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            className="items-center rounded-full p-2 px-4"
-            style={{ backgroundColor: activeTab === 'notifications' ? theme.primaryLight : 'transparent' }}
-            onPress={() => {
-              setActiveTab('notifications');
-              // Batch mark all as read on the server and reset local badge
-              if (unreadCount > 0) {
-                fetch(`${API_URL}/notifications/read-all?userId=${user.id}`, { method: 'PATCH' })
-                  .catch((err) => console.error('Batch read error:', err));
-              }
-              setUnreadCount(0);
-            }}>
-            <View>
-              <Ionicons
-                name="notifications-outline"
-                size={24}
-                color={activeTab === 'notifications' ? theme.primary : theme.textMuted}
-              />
-              {unreadCount > 0 && (
-                <View className="absolute -right-1 -top-1 h-4 w-4 items-center justify-center rounded-full bg-[#FF6B6B]">
-                  <Text className="text-[10px] font-bold text-white">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </Text>
-                </View>
-              )}
-            </View>
-            <Text
-              className={`mt-1 text-[10px] ${activeTab === 'notifications' ? 'font-bold' : ''}`}
-              style={{ color: activeTab === 'notifications' ? theme.primary : theme.textMuted }}>
-              Notification
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            className="items-center rounded-full p-2 px-4"
-            style={{ backgroundColor: activeTab === 'more' ? theme.primaryLight : 'transparent' }}
-            onPress={() => setActiveTab('more')}>
-            <Ionicons
-              name="ellipsis-horizontal"
-              size={24}
-              color={activeTab === 'more' ? theme.primary : theme.textMuted}
-            />
-            <Text
-              className={`mt-1 text-[10px] ${activeTab === 'more' ? 'font-bold' : ''}`}
-              style={{ color: activeTab === 'more' ? theme.primary : theme.textMuted }}>
-              More
-            </Text>
-          </TouchableOpacity>
-        </View>
+        <BottomNavigationBar
+          activeTab={activeTab}
+          onTabPress={handleMainTabPress}
+          canViewHome={perms.canViewDashboard}
+          unreadCount={unreadCount}
+        />
       </SafeAreaView>
 
       {/* Modals */}
@@ -575,10 +532,11 @@ export default function HomeScreen({
         visible={!!selectedTask}
         task={selectedTask}
         userRole={user.role}
+        canViewHome={perms.canViewDashboard}
+        unreadCount={unreadCount}
         onClose={() => setSelectedTask(null)}
         onNavigate={(tab) => {
-          setSelectedTask(null);
-          setActiveTab(tab);
+          handleMainTabPress(tab);
         }}
         onAddProgress={(task) => {
           setSelectedTask(null); // Close the detail screen first to avoid Modal stacking issues
@@ -603,6 +561,11 @@ export default function HomeScreen({
             onBack={() => setShowInventory(false)}
             userRole={user.role}
             userId={user.id}
+            activeMainTab={activeTab === 'notifications' ? 'notifications' : 'mywork'}
+            canViewHome={perms.canViewDashboard}
+            unreadCount={unreadCount}
+            onNavigate={handleMainTabPress}
+            showBottomNav
           />
         </Modal>
       )}

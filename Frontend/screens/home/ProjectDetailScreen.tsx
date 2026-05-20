@@ -17,6 +17,7 @@ import ProjectTasksView from './ProjectTasksView';
 import TaskDetailScreen from './TaskDetailScreen';
 import { type UserRole } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { MainTab } from '../../components/BottomNavigationBar';
 
 const { width } = Dimensions.get('window');
 
@@ -38,6 +39,9 @@ interface Props {
   userId: number;
   onBack: () => void;
   userRole?: UserRole;
+  onNavigate?: (tab: MainTab) => void;
+  canViewHome?: boolean;
+  unreadCount?: number;
 }
 
 const PRIMARY = '#7370FF';
@@ -74,7 +78,15 @@ function daysLeft(end?: string) {
   return diff > 0 ? diff : 0;
 }
 
-export default function ProjectDetailScreen({ projectId, userId, onBack, userRole }: Props) {
+export default function ProjectDetailScreen({
+  projectId,
+  userId,
+  onBack,
+  userRole,
+  onNavigate,
+  canViewHome = true,
+  unreadCount = 0,
+}: Props) {
   const { theme } = useAppTheme();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,7 +118,18 @@ export default function ProjectDetailScreen({ projectId, userId, onBack, userRol
   }, [projectId]);
 
   if (activeSection === 'inventory' && project) {
-    return <InventoryScreen projectId={project.id} userId={userId} onBack={() => setActiveSection('detail')} userRole={userRole} />;
+    return (
+      <InventoryScreen
+        projectId={project.id}
+        userId={userId}
+        onBack={() => setActiveSection('detail')}
+        userRole={userRole}
+        activeMainTab="home"
+        canViewHome={canViewHome}
+        unreadCount={unreadCount}
+        onNavigate={onNavigate}
+      />
+    );
   }
 
   if (activeSection === 'tasks' && project) {
@@ -124,6 +147,16 @@ export default function ProjectDetailScreen({ projectId, userId, onBack, userRol
             task={selectedTask}
             onClose={() => setSelectedTask(null)}
             userRole={userRole}
+            canViewHome={canViewHome}
+            unreadCount={unreadCount}
+            onNavigate={(tab) => {
+              setSelectedTask(null);
+              onNavigate?.(tab);
+            }}
+            onViewInventory={() => {
+              setSelectedTask(null);
+              setActiveSection('inventory');
+            }}
           />
         )}
       </View>
