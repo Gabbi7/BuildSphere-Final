@@ -7,7 +7,6 @@ import {
   ScrollView,
   Modal,
   Image,
-  ActivityIndicator,
   Animated,
   Alert,
   Platform,
@@ -19,6 +18,7 @@ import { getPermissions, type UserRole } from '../../constants/roles';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
+import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
 
 
 interface TaskDetailScreenProps {
@@ -127,6 +127,19 @@ export default function TaskDetailScreen({
   const comments: Comment[] = [];
   const priorityColor = task.priority?.toLowerCase() === 'high' ? '#FF6B6B' : '#FFA500';
 
+  const formatProgressTimestamp = (createdAt?: string) => {
+    if (!createdAt) return 'Log';
+    const date = new Date(createdAt);
+    return `${date.toLocaleDateString([], {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })} • ${date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+  };
+
   const toggleFab = () => {
     const toValue = fabOpen ? 0 : 1;
     Animated.spring(fabAnim, { toValue, useNativeDriver: true, friction: 6 }).start();
@@ -138,8 +151,8 @@ export default function TaskDetailScreen({
     ...(perms.canEditInventory ? [{ label: 'Update inventory', icon: 'cube-outline', key: 'inventory' }] : []),
     ...(perms.canSubmitSiteUpdates ? [{ label: 'Upload Site Progress', icon: 'cloud-upload-outline', key: 'site' }] : []),
   ];
-  const fabBottom = Math.max(insets.bottom + 90, 110);
-  const fabMenuBottom = Math.max(insets.bottom + 140, 160);
+  const fabBottom = Math.max(insets.bottom + 80, 100);
+  const fabMenuBottom = Math.max(insets.bottom + 130, 150);
 
   const handleInventoryPress = () => {
     const projectId = Number(task.project_id || task.projectId);
@@ -160,11 +173,15 @@ export default function TaskDetailScreen({
     <Modal visible={visible} animationType="slide" transparent={false}>
       <View className="flex-1" style={{ backgroundColor: theme.background }}>
         {/* Header */}
-        <View className="flex-row items-center px-5 pb-4 pt-12">
-          <TouchableOpacity onPress={onClose} className="mr-3 -ml-2 -mt-1">
+        <View
+          className="flex-row items-center px-5 pb-4"
+          style={{ paddingTop: Math.max(insets.top + 12, 56) }}>
+          <TouchableOpacity onPress={onClose} className="mr-3 -ml-2">
             <Ionicons name="caret-back-outline" size={24} color={theme.text} />
           </TouchableOpacity>
-          <Text className="text-[32px] font-bold" style={{ color: theme.primary }}>Task Details</Text>
+          <Text className="flex-1 text-[32px] font-bold" style={{ color: theme.primary }} numberOfLines={1}>
+            Task Details
+          </Text>
         </View>
 
         <ScrollView
@@ -268,7 +285,25 @@ export default function TaskDetailScreen({
             </View>
 
             {loadingHistory ? (
-              <ActivityIndicator color={theme.primary} />
+              <View>
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <SkeletonCard key={index} style={{ borderRadius: 16, padding: 16 }}>
+                    <View className="flex-row items-start">
+                      <SkeletonBox width={10} height={10} borderRadius={5} style={{ marginRight: 12, marginTop: 6 }} />
+                      <View className="flex-1">
+                        <View className="mb-3 flex-row items-center">
+                          <SkeletonBox width={32} height={32} borderRadius={16} style={{ marginRight: 8 }} />
+                          <SkeletonText width="40%" height={13} />
+                          <SkeletonBox width={72} height={20} borderRadius={999} style={{ marginLeft: 8 }} />
+                        </View>
+                        <SkeletonText width="92%" height={11} />
+                        <SkeletonText width="72%" height={11} style={{ marginTop: 8 }} />
+                        <SkeletonBox width={128} height={38} borderRadius={10} style={{ marginTop: 12 }} />
+                      </View>
+                    </View>
+                  </SkeletonCard>
+                ))}
+              </View>
             ) : history.filter(item => !currentShift || item.shift === currentShift).length === 0 ? (
               <View className="items-center justify-center py-6 rounded-2xl border border-dashed" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
                 <Text className="text-[12px]" style={{ color: theme.textMuted }}>No {currentShift} progress recorded yet.</Text>
@@ -301,50 +336,59 @@ export default function TaskDetailScreen({
                     {/* Status Dot */}
                     <View className="h-2.5 w-2.5 rounded-full mt-1.5 mr-3" style={{ backgroundColor: idx === 0 ? theme.primary : theme.textMuted }} />
 
-                    <View className="flex-1">
-                      <View className="flex-row items-center justify-between mb-2">
-                        <View className="flex-row items-center">
-                          <View className="h-8 w-8 items-center justify-center rounded-full mr-2" style={{ backgroundColor: theme.primary }}>
+                    <View className="min-w-0 flex-1">
+                      <View className="mb-2 flex-row items-start justify-between">
+                        <View className="min-w-0 flex-1 flex-row items-start">
+                          <View className="mr-2 h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: theme.primary }}>
                             <Text className="text-[10px] font-bold text-white">
                               {item.first_name?.[0]}{item.last_name?.[0]}
                             </Text>
                           </View>
-                          <Text className="text-[14px] font-bold" style={{ color: theme.text }}>
-                            {item.first_name} {item.last_name}
-                          </Text>
-                          <View className="ml-2 px-2 py-0.5 rounded-full" style={{ backgroundColor: theme.mode === 'dark' ? '#1a3d24' : '#E8FBF2' }}>
-                            <Text className="text-[10px] font-bold" style={{ color: '#27AE60' }}>
-                              + {item.quantity_accomplished} units
-                            </Text>
-                          </View>
-                          {item.shift && (
-                            <View className="ml-2 px-2 py-0.5 rounded-full border" style={{ backgroundColor: theme.primaryLight, borderColor: theme.border }}>
-                              <Text className="text-[10px] font-bold" style={{ color: theme.primary }}>
-                                {item.shift}
+                          <View className="min-w-0 flex-1">
+                            <View className="flex-row flex-wrap items-center">
+                              <Text
+                                className="mr-2 text-[14px] font-bold"
+                                style={{ color: theme.text, flexShrink: 1, maxWidth: '100%' }}
+                                numberOfLines={2}>
+                                {item.first_name} {item.last_name}
+                              </Text>
+                              <View className="mb-1 mr-1 rounded-full px-2 py-0.5" style={{ backgroundColor: theme.mode === 'dark' ? '#1a3d24' : '#E8FBF2' }}>
+                                <Text className="text-[10px] font-bold" style={{ color: '#27AE60' }} numberOfLines={1}>
+                                  +{item.quantity_accomplished} units
+                                </Text>
+                              </View>
+                              {item.shift && (
+                                <View className="mb-1 rounded-full border px-2 py-0.5" style={{ backgroundColor: theme.primaryLight, borderColor: theme.border }}>
+                                  <Text className="text-[10px] font-bold" style={{ color: theme.primary }} numberOfLines={1}>
+                                    {item.shift}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <View className="mt-1 flex-row items-center">
+                              <Ionicons name="time-outline" size={13} color={theme.textMuted} />
+                              <Text
+                                className="ml-1 flex-1 text-[11px] font-medium"
+                                style={{ color: theme.textMuted }}
+                                numberOfLines={2}>
+                                {formatProgressTimestamp(item.created_at)}
                               </Text>
                             </View>
-                          )}
+                          </View>
                         </View>
-                        <View className="flex-row items-center">
-                          <Ionicons name="time-outline" size={14} color={theme.text} />
-                          <Text className="ml-1 text-[10px] font-medium" style={{ color: theme.textMuted }}>
-                            {item.created_at 
-                              ? `${new Date(item.created_at).toLocaleDateString([], { month: 'numeric', day: 'numeric' })} @ ${new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` 
-                              : 'Log'}
-                          </Text>
-                          <TouchableOpacity
-                            onPress={() => {
-                              setSelectedHistoryItem(item);
-                              setShowActionMenu(true);
-                            }}
-                            className="ml-2">
-                            <Ionicons name="ellipsis-vertical" size={14} color={theme.text} />
-                          </TouchableOpacity>
-                        </View>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setSelectedHistoryItem(item);
+                            setShowActionMenu(true);
+                          }}
+                          className="ml-2 h-8 w-8 items-center justify-center rounded-full"
+                          style={{ backgroundColor: theme.input }}>
+                          <Ionicons name="ellipsis-vertical" size={14} color={theme.text} />
+                        </TouchableOpacity>
 
                       </View>
 
-                      <Text className="text-[12px] leading-5 mb-3" style={{ color: theme.textSecondary }}>
+                      <Text className="mb-3 text-[12px] leading-5" style={{ color: theme.textSecondary }}>
                         {item.remarks || "Site update recorded successfully."}
                       </Text>
 

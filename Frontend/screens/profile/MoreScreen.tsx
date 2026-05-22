@@ -1,15 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Image, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Image, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { UserInfo } from '../../App';
 import EditInformationScreen from './EditInformationScreen';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { ProfileSkeleton } from '../../components/skeletons';
 
 interface MoreScreenProps {
   user: UserInfo;
   onLogout: () => void;
   onUserUpdated: (updated: UserInfo) => void;
+}
+
+function parseDateOnly(value?: string | null) {
+  if (!value) return null;
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
 }
 
 export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreenProps) {
@@ -53,14 +61,15 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
     : null;
 
   const fullName = [firstName, middleName, lastName, suffix].filter(Boolean).join(' ');
+  const birthdateDate = parseDateOnly(profile.birthdate);
   const age =
-    profile.birthdate
+    birthdateDate
       ? Math.max(
           0,
-          new Date().getFullYear() - new Date(profile.birthdate).getFullYear() -
-            (new Date().getMonth() < new Date(profile.birthdate).getMonth() ||
-            (new Date().getMonth() === new Date(profile.birthdate).getMonth() &&
-              new Date().getDate() < new Date(profile.birthdate).getDate())
+          new Date().getFullYear() - birthdateDate.getFullYear() -
+            (new Date().getMonth() < birthdateDate.getMonth() ||
+            (new Date().getMonth() === birthdateDate.getMonth() &&
+              new Date().getDate() < birthdateDate.getDate())
               ? 1
               : 0)
         )
@@ -83,6 +92,10 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <ScrollView className="flex-1 px-6 pt-14" contentContainerStyle={{ paddingBottom: 150 }}>
+        {loadingProfile ? (
+          <ProfileSkeleton />
+        ) : (
+          <>
         {/* Avatar + Name */}
         <View className="mb-10 mt-6 items-center">
           {/* Avatar */}
@@ -112,14 +125,9 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
             </View>
           )}
 
-          {loadingProfile && <ActivityIndicator className="mt-2" color="#7370FF" />}
           <Text className="mt-4 text-[20px] font-bold" style={{ color: theme.text }}>{fullName || 'Unnamed User'}</Text>
           <Text className="mt-1 text-[13px]" style={{ color: theme.textMuted }}>{profile.email}</Text>
           <Text className="mt-1 text-[12px] uppercase" style={{ color: theme.textSecondary }}>{profile.role || 'staff'}</Text>
-
-          <TouchableOpacity onPress={() => setScreen('editInfo')} className="mt-2">
-            <Text className="text-[13px] font-semibold text-[#7370FF]">Edit Profile</Text>
-          </TouchableOpacity>
         </View>
 
         <View 
@@ -148,7 +156,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
           <View className="flex-row flex-wrap">
             {[
               { icon: 'call-outline', label: 'Phone', value: profile.phoneNumber, color: '#4dabf7' },
-              { icon: 'calendar-outline', label: 'Birthdate', value: profile.birthdate ? new Date(profile.birthdate).toLocaleDateString() : null, color: '#ff922b' },
+              { icon: 'calendar-outline', label: 'Birthdate', value: birthdateDate ? birthdateDate.toLocaleDateString() : null, color: '#ff922b' },
               { icon: 'hourglass-outline', label: 'Age', value: age, color: '#51cf66' },
               { icon: 'business-outline', label: 'Dept', value: profile.department, color: '#7370FF' },
               { icon: 'briefcase-outline', label: 'Position', value: profile.position, color: '#f06595' },
@@ -178,6 +186,8 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
             </View>
           </View>
         </View>
+          </>
+        )}
 
         {/* Menu Items */}
         <View
@@ -200,30 +210,6 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
             </View>
           </View>
           
-          <TouchableOpacity
-            onPress={async () => {
-              try {
-                const res = await fetch(`${API_URL}/notifications/test`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ user_id: user.id }),
-                });
-                if (res.ok) {
-                  Alert.alert('Success', 'Test notification sent!');
-                } else {
-                  Alert.alert('Error', 'Failed to send test notification.');
-                }
-              } catch (err) {
-                Alert.alert('Error', 'Network error.');
-              }
-            }}
-            className="flex-row items-center border-b px-5 py-4" style={{ borderColor: theme.border }}>
-            <View className="mr-3 h-8 w-8 items-center justify-center rounded-full bg-[#E8F5E9]">
-              <Ionicons name="flask-outline" size={18} color="#4CAF50" />
-            </View>
-            <Text className="text-[15px] font-medium" style={{ color: theme.text }}>Send Test Notification</Text>
-          </TouchableOpacity>
-
           <TouchableOpacity 
             onPress={() => {
               Alert.alert(

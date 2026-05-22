@@ -10,6 +10,7 @@ Gemini is used only to summarize the structured result.
 import base64
 import logging
 import time
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -22,7 +23,6 @@ from app.models import Detection, DetectionResponse
 # Glass is transparent/reflective, so useful crops usually have color variance.
 _MIN_COLOR_VARIANCE: float = 45.0
 _MIN_REL_SIZE: float = 0.005
-_PARTIAL_MARGIN_PX: int = 10
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ class GlassPanelDetector:
     def is_loaded(self) -> bool:
         return self._is_loaded
 
-    def detect(self, image: Image.Image) -> DetectionResponse:
+    def detect(self, image: Image.Image, file_size_bytes: int | None = None) -> DetectionResponse:
         """
         Run regular YOLOv8 object detection on a PIL Image.
 
@@ -81,7 +81,7 @@ class GlassPanelDetector:
         start_time = time.perf_counter()
         results = self.model.predict(
             source=image,
-            conf=settings.CONFIDENCE_THRESHOLD,
+            conf=0.001,
             iou=settings.NMS_IOU_THRESHOLD,
             imgsz=settings.INFERENCE_IMAGE_SIZE,
             max_det=settings.MAX_DETECTIONS,
@@ -106,29 +106,90 @@ class GlassPanelDetector:
         excluded_small_boxes = 0
         excluded_unrealistic_shape = 0
         detection_mode = "box"
+        raw_yolo_count = 0
+        after_confidence_count = 0
+        after_size_count = 0
+        after_duplicate_count = 0
+        raw_detections: list[dict] = []
+        confidence_detections: list[dict] = []
+        size_filtered_detections: list[dict] = []
+        filtered_detections: list[dict] = []
+        excluded_debug: list[dict] = []
+        partial_debug: list[dict] = []
+        counted_debug: list[dict] = []
+        debug_enabled = settings.GLASS_COUNTER_DEBUG
+        debug_token = f"{int(time.time() * 1000)}"
+
+        logger.info(
+            "Glass analysis input | image_width=%s image_height=%s file_size_bytes=%s debug=%s",
+            original_width,
+            original_height,
+            file_size_bytes,
+            debug_enabled,
+        )
 
         if results and len(results) > 0:
             result = results[0]
             boxes = result.boxes
 
             if boxes is not None and len(boxes) > 0:
-                logger.info("YOLOv8 box detector found %s raw boxes", len(boxes))
-                raw_detections = []
+                raw_yolo_count = len(boxes)
+                logger.info("Glass analysis stage | raw_yolo_detections=%s", raw_yolo_count)
 
                 for i in range(len(boxes)):
                     xyxy = boxes.xyxy[i].cpu().numpy()
                     confidence = float(boxes.conf[i].cpu().numpy())
                     class_id = int(boxes.cls[i].cpu().numpy())
-
-                    if settings.USE_PRETRAINED_COCO and class_id == 0:
-                        continue
-
                     x_min, y_min, x_max, y_max = map(int, xyxy)
+                    class_name = (
+                        result.names[class_id]
+                        if result.names and class_id in result.names
+                        else "glass_panel"
+                    )
+                    det = {
+                        "raw_index": i + 1,
+                        "xyxy": xyxy,
+                        "conf": confidence,
+                        "class_id": class_id,
+                        "class_name": class_name,
+                    }
+                    raw_detections.append(det)
 
-                    if confidence < settings.CONFIDENCE_THRESHOLD:
-                        excluded_low_confidence += 1
+                    if debug_enabled:
+                        logger.info(
+                            "Glass debug raw #%s: x1=%s y1=%s x2=%s y2=%s confidence=%.4f class=%s",
+                            i + 1,
+                            x_min,
+                            y_min,
+                            x_max,
+                            y_max,
+                            confidence,
+                            class_name,
+                        )
+
+                # YOLO proposes boxes. Python owns filtering and the final counted-box total.
+                for det in raw_detections:
+                    if settings.USE_PRETRAINED_COCO and det["class_id"] == 0:
+                        rejected = {**det, "reason": "class_filter", "label": "EXCLUDED class"}
+                        excluded_debug.append(rejected)
                         continue
+                    if det["conf"] < settings.CONFIDENCE_THRESHOLD:
+                        excluded_low_confidence += 1
+                        rejected = {**det, "reason": "low_confidence", "label": "EXCLUDED low confidence"}
+                        excluded_debug.append(rejected)
+                        continue
+                    confidence_detections.append(det)
 
+                after_confidence_count = len(confidence_detections)
+                logger.info(
+                    "Glass analysis stage | after_confidence_filter=%s confidence_threshold=%.3f excluded_low_confidence=%s",
+                    after_confidence_count,
+                    settings.CONFIDENCE_THRESHOLD,
+                    excluded_low_confidence,
+                )
+
+                for det in confidence_detections:
+                    x_min, y_min, x_max, y_max = map(int, det["xyxy"])
                     shape_rejection = self._box_rejection_reason(
                         x_min,
                         y_min,
@@ -139,25 +200,23 @@ class GlassPanelDetector:
                     )
                     if shape_rejection == "small":
                         excluded_small_boxes += 1
-                        logger.info(
-                            "Rejected detection at [%s,%s,%s,%s] (conf=%.2f): box too small",
-                            x_min,
-                            y_min,
-                            x_max,
-                            y_max,
-                            confidence,
-                        )
+                        rejected = {**det, "reason": "small_box", "label": "EXCLUDED small"}
+                        excluded_debug.append(rejected)
+                        if debug_enabled:
+                            logger.info(
+                                "Glass debug excluded raw #%s as small_box: [%s,%s,%s,%s] conf=%.4f",
+                                det["raw_index"],
+                                x_min,
+                                y_min,
+                                x_max,
+                                y_max,
+                                det["conf"],
+                            )
                         continue
                     if shape_rejection == "shape":
                         excluded_unrealistic_shape += 1
-                        logger.info(
-                            "Rejected detection at [%s,%s,%s,%s] (conf=%.2f): unrealistic aspect ratio",
-                            x_min,
-                            y_min,
-                            x_max,
-                            y_max,
-                            confidence,
-                        )
+                        rejected = {**det, "reason": "unrealistic_shape", "label": "EXCLUDED shape"}
+                        excluded_debug.append(rejected)
                         continue
 
                     if self._is_wall_or_column(
@@ -169,50 +228,60 @@ class GlassPanelDetector:
                         original_width,
                         original_height,
                     ):
-                        logger.info(
-                            "Rejected detection at [%s,%s,%s,%s] (conf=%.2f): low color variance or too small",
-                            x_min,
-                            y_min,
-                            x_max,
-                            y_max,
-                            confidence,
-                        )
+                        excluded_unrealistic_shape += 1
+                        rejected = {**det, "reason": "low_variance", "label": "EXCLUDED low variance"}
+                        excluded_debug.append(rejected)
                         continue
 
-                    class_name = (
-                        result.names[class_id]
-                        if result.names and class_id in result.names
-                        else "glass_panel"
-                    )
-                    raw_detections.append(
-                        {
-                            "xyxy": xyxy,
-                            "conf": confidence,
-                            "class_name": class_name,
-                        }
-                    )
+                    size_filtered_detections.append(det)
 
-                before_nms = len(raw_detections)
-                raw_detections = self._perform_nms(raw_detections, settings.NMS_IOU_THRESHOLD)
-                if len(raw_detections) < before_nms:
-                    excluded_duplicates += before_nms - len(raw_detections)
-                    logger.info("NMS suppressed %s overlapping boxes", before_nms - len(raw_detections))
+                after_size_count = len(size_filtered_detections)
+                logger.info(
+                    "Glass analysis stage | after_size_filter=%s excluded_small=%s excluded_shape_or_variance=%s min_area_ratio=%.4f min_width_ratio=%.4f min_height_ratio=%.4f",
+                    after_size_count,
+                    excluded_small_boxes,
+                    excluded_unrealistic_shape,
+                    settings.MIN_BOX_AREA_RATIO,
+                    settings.MIN_BOX_WIDTH_RATIO,
+                    settings.MIN_BOX_HEIGHT_RATIO,
+                )
 
-                before_containment = len(raw_detections)
-                raw_detections = self._remove_contained_boxes(
-                    raw_detections,
+                duplicate_filtered, duplicate_excluded = self._perform_nms_with_exclusions(
+                    size_filtered_detections,
+                    settings.DUPLICATE_IOU_THRESHOLD,
+                )
+                excluded_duplicates += len(duplicate_excluded)
+                excluded_debug.extend(
+                    {**det, "reason": "duplicate", "label": "EXCLUDED duplicate"}
+                    for det in duplicate_excluded
+                )
+                after_duplicate_count = len(duplicate_filtered)
+                logger.info(
+                    "Glass analysis stage | after_duplicate_filter=%s duplicate_iou_threshold=%.3f excluded_duplicates=%s",
+                    after_duplicate_count,
+                    settings.DUPLICATE_IOU_THRESHOLD,
+                    excluded_duplicates,
+                )
+
+                filtered_detections, contained_excluded = self._remove_contained_boxes_with_exclusions(
+                    duplicate_filtered,
                     settings.CONTAINMENT_THRESHOLD,
                 )
-                if len(raw_detections) < before_containment:
-                    excluded_contained += before_containment - len(raw_detections)
-                    logger.info(
-                        "Containment filtering removed %s nested boxes",
-                        before_containment - len(raw_detections),
-                    )
+                excluded_contained += len(contained_excluded)
+                excluded_debug.extend(
+                    {**det, "reason": "contained", "label": "EXCLUDED duplicate"}
+                    for det in contained_excluded
+                )
+                logger.info(
+                    "Glass analysis stage | after_containment_filter=%s containment_threshold=%.3f excluded_contained=%s",
+                    len(filtered_detections),
+                    settings.CONTAINMENT_THRESHOLD,
+                    excluded_contained,
+                )
 
-                raw_detections.sort(key=lambda det: det["conf"], reverse=True)
+                filtered_detections.sort(key=lambda det: det["conf"], reverse=True)
 
-                for det in raw_detections:
+                for det in filtered_detections:
                     xyxy = det["xyxy"]
                     confidence = det["conf"]
                     x_min, y_min, x_max, y_max = map(int, xyxy)
@@ -231,12 +300,14 @@ class GlassPanelDetector:
                         partial_panels += 1
                         color = (0, 165, 255)  # BGR orange/yellow warning.
                         label_text = "Partial - Not Counted"
+                        partial_debug.append({**det, "reason": "partial", "label": "PARTIAL not counted"})
                     else:
                         status = "full"
                         counted = True
                         total_valid_panels += 1
                         color = (0, 0, 255)  # Existing counted color.
                         label_text = f"Counted #{total_valid_panels}"
+                        counted_debug.append({**det, "count_index": total_valid_panels, "label": f"COUNTED #{total_valid_panels}"})
 
                     detections.append(
                         Detection(
@@ -260,6 +331,46 @@ class GlassPanelDetector:
 
                     cv2.rectangle(cv_img, (x_min, y_min), (x_max, y_max), color, 2)
                     self._draw_label(cv_img, cv2, x_min, y_min, label_text, color)
+            else:
+                logger.info("Glass analysis stage | raw_yolo_detections=0")
+                logger.info(
+                    "Glass analysis stage | after_confidence_filter=0 confidence_threshold=%.3f excluded_low_confidence=0",
+                    settings.CONFIDENCE_THRESHOLD,
+                )
+                logger.info(
+                    "Glass analysis stage | after_size_filter=0 excluded_small=0 excluded_shape_or_variance=0 min_area_ratio=%.4f min_width_ratio=%.4f min_height_ratio=%.4f",
+                    settings.MIN_BOX_AREA_RATIO,
+                    settings.MIN_BOX_WIDTH_RATIO,
+                    settings.MIN_BOX_HEIGHT_RATIO,
+                )
+                logger.info(
+                    "Glass analysis stage | after_duplicate_filter=0 duplicate_iou_threshold=%.3f excluded_duplicates=0",
+                    settings.DUPLICATE_IOU_THRESHOLD,
+                )
+                logger.info(
+                    "Glass analysis stage | after_containment_filter=0 containment_threshold=%.3f excluded_contained=0",
+                    settings.CONTAINMENT_THRESHOLD,
+                )
+        else:
+            logger.info("Glass analysis stage | raw_yolo_detections=0")
+            logger.info(
+                "Glass analysis stage | after_confidence_filter=0 confidence_threshold=%.3f excluded_low_confidence=0",
+                settings.CONFIDENCE_THRESHOLD,
+            )
+            logger.info(
+                "Glass analysis stage | after_size_filter=0 excluded_small=0 excluded_shape_or_variance=0 min_area_ratio=%.4f min_width_ratio=%.4f min_height_ratio=%.4f",
+                settings.MIN_BOX_AREA_RATIO,
+                settings.MIN_BOX_WIDTH_RATIO,
+                settings.MIN_BOX_HEIGHT_RATIO,
+            )
+            logger.info(
+                "Glass analysis stage | after_duplicate_filter=0 duplicate_iou_threshold=%.3f excluded_duplicates=0",
+                settings.DUPLICATE_IOU_THRESHOLD,
+            )
+            logger.info(
+                "Glass analysis stage | after_containment_filter=0 containment_threshold=%.3f excluded_contained=0",
+                settings.CONTAINMENT_THRESHOLD,
+            )
 
         avg_confidence = (
             sum(det.confidence_score for det in detections) / len(detections)
@@ -300,6 +411,56 @@ class GlassPanelDetector:
             original_height,
             detection_mode,
         )
+        logger.info(
+            "Glass analysis summary | raw_yolo=%s after_confidence=%s after_size=%s after_duplicate=%s after_containment=%s partial=%s final_counted=%s",
+            raw_yolo_count,
+            after_confidence_count,
+            after_size_count,
+            after_duplicate_count,
+            len(filtered_detections),
+            partial_panels,
+            total_valid_panels,
+        )
+        debug_info = None
+        if debug_enabled:
+            debug_paths = self._write_debug_images(
+                image,
+                debug_token,
+                raw_detections,
+                filtered_detections,
+                counted_debug,
+                excluded_debug,
+                partial_debug,
+            )
+            logger.info(
+                "Glass Counter Summary | Raw YOLO boxes: %s | After confidence filter: %s | After size filter: %s | After duplicate filter: %s | Partial panels: %s | Final counted panels: %s",
+                raw_yolo_count,
+                after_confidence_count,
+                after_size_count,
+                after_duplicate_count,
+                partial_panels,
+                total_valid_panels,
+            )
+            if raw_yolo_count == 0:
+                logger.info("Glass Counter Summary | Reason: model did not detect any panel")
+            debug_info = {
+                "image_width": original_width,
+                "image_height": original_height,
+                "file_size_bytes": file_size_bytes,
+                "raw_detections": raw_yolo_count,
+                "after_confidence_filter": after_confidence_count,
+                "after_duplicate_filter": after_duplicate_count,
+                "after_size_filter": after_size_count,
+                "after_edge_filter": total_valid_panels,
+                "partial_panels": partial_panels,
+                "final_counted": total_valid_panels,
+                "excluded_reasons": self._summarize_excluded_reasons(excluded_debug),
+                "debug_images": debug_paths,
+                "raw_boxes": [self._debug_box_payload(det) for det in raw_detections],
+                "filtered_boxes": [self._debug_box_payload(det) for det in filtered_detections],
+                "partial_boxes": [self._debug_box_payload(det) for det in partial_debug],
+                "counted_boxes": [self._debug_box_payload(det) for det in counted_debug],
+            }
 
         return DetectionResponse(
             total_valid_panels=total_valid_panels,
@@ -322,7 +483,8 @@ class GlassPanelDetector:
             inference_time_ms=round(inference_ms, 1),
             model_version=self.model_path,
             confidence_threshold=settings.CONFIDENCE_THRESHOLD,
-            nms_iou_threshold=settings.NMS_IOU_THRESHOLD,
+            nms_iou_threshold=settings.DUPLICATE_IOU_THRESHOLD,
+            debug=debug_info,
         )
 
     def draw_fallback_boxes(
@@ -364,7 +526,7 @@ class GlassPanelDetector:
             )
 
         before_nms = len(raw_detections)
-        raw_detections = self._perform_nms(raw_detections, settings.NMS_IOU_THRESHOLD)
+        raw_detections = self._perform_nms(raw_detections, settings.DUPLICATE_IOU_THRESHOLD)
         after_nms = len(raw_detections)
         if len(raw_detections) < before_nms:
             # Diagnostic only: fallback boxes are still post-processed by Python.
@@ -491,7 +653,7 @@ class GlassPanelDetector:
             inference_time_ms=round(inference_ms, 1),
             model_version="gemini-vision-fallback",
             confidence_threshold=0.0,
-            nms_iou_threshold=settings.NMS_IOU_THRESHOLD,
+            nms_iou_threshold=settings.DUPLICATE_IOU_THRESHOLD,
         )
 
     @staticmethod
@@ -504,7 +666,7 @@ class GlassPanelDetector:
         image_height: int,
     ) -> bool:
         """Return True when a detected panel touches or nearly touches the image edge."""
-        margin = _PARTIAL_MARGIN_PX
+        margin = settings.EDGE_MARGIN
         return (
             x_min <= margin
             or y_min <= margin
@@ -699,6 +861,181 @@ class GlassPanelDetector:
             sorted_dets = remaining
 
         return keep
+
+    @staticmethod
+    def _perform_nms_with_exclusions(detections: list[dict], iou_threshold: float) -> tuple[list[dict], list[dict]]:
+        """Return kept boxes plus boxes rejected as duplicates by Python NMS."""
+        if not detections:
+            return [], []
+
+        sorted_dets = sorted(detections, key=lambda det: det["conf"], reverse=True)
+        keep: list[dict] = []
+        excluded: list[dict] = []
+
+        while sorted_dets:
+            best_det = sorted_dets.pop(0)
+            keep.append(best_det)
+
+            remaining = []
+            for det in sorted_dets:
+                iou = GlassPanelDetector._compute_iou(best_det["xyxy"], det["xyxy"])
+                if iou < iou_threshold:
+                    remaining.append(det)
+                else:
+                    excluded.append({**det, "duplicate_of": best_det.get("raw_index"), "iou": round(iou, 4)})
+            sorted_dets = remaining
+
+        return keep, excluded
+
+    @staticmethod
+    def _remove_contained_boxes_with_exclusions(
+        detections: list[dict],
+        containment_threshold: float,
+    ) -> tuple[list[dict], list[dict]]:
+        """Return kept boxes plus boxes rejected because another box contains them."""
+        if not detections:
+            return [], []
+
+        def area(det: dict) -> float:
+            x1, y1, x2, y2 = det["xyxy"]
+            return max(0.0, float(x2 - x1)) * max(0.0, float(y2 - y1))
+
+        kept: list[dict] = []
+        excluded: list[dict] = []
+        for candidate in sorted(detections, key=area, reverse=True):
+            candidate_area = area(candidate)
+            if candidate_area <= 0:
+                continue
+
+            containing_raw_index = None
+            for existing in kept:
+                smaller_area = min(candidate_area, area(existing))
+                if smaller_area <= 0:
+                    continue
+
+                intersection = GlassPanelDetector._compute_intersection_area(
+                    candidate["xyxy"],
+                    existing["xyxy"],
+                )
+                if intersection / smaller_area >= containment_threshold:
+                    containing_raw_index = existing.get("raw_index")
+                    break
+
+            if containing_raw_index is None:
+                kept.append(candidate)
+            else:
+                excluded.append({**candidate, "contained_by": containing_raw_index})
+
+        return kept, excluded
+
+    @staticmethod
+    def _debug_box_payload(det: dict) -> dict:
+        x1, y1, x2, y2 = map(float, det["xyxy"])
+        return {
+            "raw_index": det.get("raw_index"),
+            "x1": round(x1, 1),
+            "y1": round(y1, 1),
+            "x2": round(x2, 1),
+            "y2": round(y2, 1),
+            "confidence": round(float(det["conf"]), 4),
+            "class_label": det.get("class_name", "glass_panel"),
+            "reason": det.get("reason"),
+        }
+
+    @staticmethod
+    def _summarize_excluded_reasons(excluded: list[dict]) -> list[dict]:
+        reason_counts: dict[str, int] = {}
+        for det in excluded:
+            reason = str(det.get("reason") or "unknown")
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        return [
+            {"reason": reason, "count": count}
+            for reason, count in sorted(reason_counts.items())
+        ]
+
+    @staticmethod
+    def _write_debug_images(
+        image: Image.Image,
+        token: str,
+        raw_detections: list[dict],
+        filtered_detections: list[dict],
+        counted_detections: list[dict],
+        excluded_detections: list[dict],
+        partial_detections: list[dict],
+    ) -> dict:
+        """
+        Save backend-only debug images.
+
+        YOLO proposes raw boxes. Python filters boxes. Only counted boxes become
+        the AI suggested count; debug images show where a missing panel dropped.
+        """
+        import cv2
+
+        debug_dir = Path(settings.GLASS_COUNTER_DEBUG_DIR)
+        if not debug_dir.is_absolute():
+            debug_dir = Path(__file__).resolve().parent.parent / debug_dir
+        debug_dir.mkdir(parents=True, exist_ok=True)
+
+        raw_img = np.array(image.convert("RGB"))[:, :, ::-1].copy()
+        filtered_img = raw_img.copy()
+        counted_img = raw_img.copy()
+
+        GlassPanelDetector._draw_debug_boxes(
+            raw_img,
+            cv2,
+            raw_detections,
+            lambda det, idx: f"RAW #{det.get('raw_index', idx)} {float(det['conf']):.2f}",
+            (255, 0, 255),
+        )
+        GlassPanelDetector._draw_debug_boxes(
+            filtered_img,
+            cv2,
+            excluded_detections,
+            lambda det, _idx: str(det.get("label") or f"EXCLUDED {det.get('reason', 'unknown')}"),
+            (0, 165, 255),
+        )
+        GlassPanelDetector._draw_debug_boxes(
+            filtered_img,
+            cv2,
+            filtered_detections,
+            lambda _det, _idx: "FILTERED",
+            (255, 0, 0),
+        )
+        GlassPanelDetector._draw_debug_boxes(
+            counted_img,
+            cv2,
+            partial_detections,
+            lambda _det, _idx: "PARTIAL not counted",
+            (0, 165, 255),
+        )
+        GlassPanelDetector._draw_debug_boxes(
+            counted_img,
+            cv2,
+            counted_detections,
+            lambda det, idx: str(det.get("label") or f"COUNTED #{idx}"),
+            (0, 0, 255),
+        )
+
+        paths = {
+            "received_input": str(debug_dir / f"{token}_received_input.jpg"),
+            "raw_detections": str(debug_dir / f"{token}_raw_detections.jpg"),
+            "filtered_detections": str(debug_dir / f"{token}_filtered_detections.jpg"),
+            "final_counted": str(debug_dir / f"{token}_final_counted.jpg"),
+        }
+        image.convert("RGB").save(paths["received_input"], format="JPEG", quality=95)
+        cv2.imwrite(paths["raw_detections"], raw_img)
+        cv2.imwrite(paths["filtered_detections"], filtered_img)
+        cv2.imwrite(paths["final_counted"], counted_img)
+        logger.info("Glass debug images saved: %s", paths)
+        return paths
+
+    @staticmethod
+    def _draw_debug_boxes(cv_img: np.ndarray, cv2, detections: list[dict], label_fn, color: tuple[int, int, int]) -> None:
+        for idx, det in enumerate(detections, start=1):
+            x_min, y_min, x_max, y_max = map(int, det["xyxy"])
+            label = label_fn(det, idx)
+            cv2.rectangle(cv_img, (x_min, y_min), (x_max, y_max), color, 2)
+            GlassPanelDetector._draw_label(cv_img, cv2, x_min, y_min, label, color)
 
     @staticmethod
     def _compute_intersection_area(box1: list | np.ndarray, box2: list | np.ndarray) -> float:

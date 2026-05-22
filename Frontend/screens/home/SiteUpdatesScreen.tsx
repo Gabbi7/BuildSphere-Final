@@ -4,7 +4,6 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   Image,
   Modal,
   Dimensions,
@@ -12,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
 
 const { width } = Dimensions.get('window');
 
@@ -41,8 +41,6 @@ interface Props {
   onClose: () => void;
   projectName: string;
 }
-
-const PRIMARY = '#7370FF';
 
 export default function SiteUpdatesScreen({ visible, onClose, projectName }: Props) {
   const { theme } = useAppTheme();
@@ -189,7 +187,29 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
             <Text className="mb-4 text-[18px] font-bold" style={{ color: theme.text }}>Site Photos</Text>
 
             {loading ? (
-              <ActivityIndicator color={PRIMARY} />
+              <View>
+                <SkeletonBox height={240} borderRadius={24} style={{ marginBottom: 24 }} />
+                <View className="mb-6 flex-row">
+                  <View className="flex-1">
+                    <SkeletonText width={42} height={11} />
+                    <SkeletonText width={92} height={16} style={{ marginTop: 9 }} />
+                  </View>
+                  <View className="flex-1 items-center">
+                    <SkeletonText width={64} height={11} />
+                    <SkeletonText width={96} height={16} style={{ marginTop: 9 }} />
+                  </View>
+                  <View className="flex-1 items-end">
+                    <SkeletonText width={38} height={11} />
+                    <SkeletonText width={72} height={16} style={{ marginTop: 9 }} />
+                  </View>
+                </View>
+                <SkeletonText width={58} height={12} />
+                <SkeletonText width="82%" height={15} style={{ marginTop: 10, marginBottom: 28 }} />
+                <SkeletonCard style={{ borderRadius: 24, padding: 24 }}>
+                  <SkeletonText width={110} height={18} />
+                  <SkeletonText width="70%" height={12} style={{ marginTop: 20 }} />
+                </SkeletonCard>
+              </View>
             ) : (
               <View>
                 {/* Photo Container */}

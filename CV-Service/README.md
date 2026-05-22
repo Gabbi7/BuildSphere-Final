@@ -184,3 +184,120 @@ docker run --gpus all -p 8000:8000 buildsphere-cv
 ```bash
 pytest tests/test_api.py -v
 ```
+
+---
+
+## Glass Counter Accuracy Testing
+
+BuildSphere uses YOLOv8 bounding-box detection only. Python filters the YOLO
+boxes and produces an AI suggested count. Gemini is used only to summarize the
+structured result. The mobile app's Verified Panel Count remains the final value
+saved to the progress record.
+
+Use this workflow for capstone accuracy testing with 20-30 real site images:
+
+1. Put test images in a folder, for example:
+
+```text
+CV-Service/manual_eval/images/
+```
+
+2. Create a manifest CSV:
+
+```csv
+image_name,actual_count,verified_panel_count,notes
+site_001.jpg,12,12,clear facade
+site_002.jpg,8,8,partial panels near edge
+site_003.jpg,0,0,no glass installed
+```
+
+Required columns:
+- `image_name`
+- `actual_count`
+
+Optional columns:
+- `verified_panel_count`
+- `notes`
+
+3. Run the evaluator:
+
+```bash
+cd CV-Service
+python evaluate_glass_counter.py ^
+  --images-dir manual_eval/images ^
+  --manifest manual_eval/manifest.csv ^
+  --output-csv manual_eval/report.csv ^
+  --output-json manual_eval/report.json
+```
+
+On macOS/Linux, replace `^` with `\`.
+
+The CSV report includes:
+
+```text
+image_name, actual_count, ai_detected_count, verified_panel_count,
+absolute_error, result_type, accuracy, notes
+```
+
+`result_type` is:
+- `exact` when AI count equals actual count
+- `overcount` when AI count is higher
+- `undercount` when AI count is lower
+
+Accuracy formula:
+
+```text
+accuracy = 1 - (absolute_error / actual_count)
+```
+
+When `actual_count = 0`, accuracy is safely treated as `1.0` if the AI also
+detects zero panels, otherwise `0.0`.
+
+### Debug Mode
+
+Enable debug mode to inspect where detections were accepted or rejected:
+
+```bash
+set GLASS_COUNTER_DEBUG=true
+set GLASS_COUNTER_DEBUG_DIR=debug_outputs
+uvicorn app.main:app --reload --port 8000
+```
+
+For PowerShell:
+
+```powershell
+$env:GLASS_COUNTER_DEBUG="true"
+$env:GLASS_COUNTER_DEBUG_DIR="debug_outputs"
+uvicorn app.main:app --reload --port 8000
+```
+
+When debug mode is enabled, each analysis logs:
+- received image size
+- raw YOLO detection count
+- detections after confidence filtering
+- detections after size filtering
+- detections after duplicate filtering
+- detections marked partial
+- final counted panels
+
+Debug images are saved under `CV-Service/debug_outputs` by default:
+- `{token}_received_input.jpg`
+- `{token}_raw_detections.jpg`
+- `{token}_filtered_detections.jpg`
+- `{token}_final_counted.jpg`
+
+Normal mobile users do not see these technical debug details.
+
+### Recommended Threshold Review
+
+After testing 20-30 images, review exact/overcount/undercount patterns:
+
+- Too many false panels: raise `CONFIDENCE_THRESHOLD`, raise
+  `MIN_BOX_AREA_RATIO`, or lower `DUPLICATE_IOU_THRESHOLD`.
+- Missed real panels: lower `CONFIDENCE_THRESHOLD`, lower
+  `MIN_BOX_AREA_RATIO`, or increase `INFERENCE_IMAGE_SIZE`.
+- Edge/partial panels counted incorrectly: adjust `EDGE_MARGIN`.
+- Duplicate boxes on the same panel: lower `DUPLICATE_IOU_THRESHOLD`.
+
+More annotated training images from real BuildSphere site photos will improve
+accuracy more than threshold tuning alone.

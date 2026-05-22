@@ -1,35 +1,180 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, RefreshControl, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { LEGACY_NOTIFICATION_TYPE_MAP } from '../../constants/constants';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { NotificationSkeleton, SkeletonText } from '../../components/skeletons';
 
 interface NotificationMetadata {
-  task_id?: number;
-  project_id?: number;
-  item_id?: number;
+  task_id?: number | string;
+  taskId?: number | string;
+  project_id?: number | string;
+  projectId?: number | string;
+  item_id?: number | string;
+  inventory_item_id?: number | string;
+  inventoryItemId?: number | string;
+  site_progress_id?: number | string;
+  siteProgressId?: number | string;
+  comment_id?: number | string;
+  commentId?: number | string;
+  screen?: string;
+  type?: string;
+  [key: string]: unknown;
 }
 
 interface Notification {
   id: number;
-  type: 'update' | 'alert' | 'message' | 'success';
+  type: string;
   title: string;
   message: string;
   time: string;
   is_read: boolean;
   metadata?: NotificationMetadata | null;
+  reference_url?: string | null;
+  created_at?: string;
 }
 
 interface NotificationsProps {
   userId: number;
   onNavigateToTask?: (taskId: number) => void;
-  onNavigateToInventory?: (projectId: number) => void;
+  onNavigateToInventory?: (projectId?: number, inventoryItemId?: number) => void;
+  onNavigateToProject?: (projectId: number) => void;
+  onNavigateToSiteProgress?: (projectId?: number, taskId?: number, siteProgressId?: number) => void;
   onNavigateToTab?: (tab: 'home' | 'mywork' | 'notifications' | 'more') => void;
 }
 
-export default function Notifications({ userId, onNavigateToTask, onNavigateToInventory, onNavigateToTab }: NotificationsProps) {
+type NotificationRoute =
+  | { kind: 'inventory'; projectId?: number; inventoryItemId?: number }
+  | { kind: 'task'; taskId?: number }
+  | { kind: 'project'; projectId?: number }
+  | { kind: 'site-progress'; projectId?: number; taskId?: number; siteProgressId?: number }
+  | { kind: 'comment'; taskId?: number; projectId?: number; siteProgressId?: number; commentId?: number }
+  | { kind: 'unknown' };
+
+const TYPE_GROUPS = {
+  inventory: ['WARNING', 'LOW_STOCK', 'CRITICAL_STOCK', 'INVENTORY_LOW_STOCK'],
+  task: ['TASK_PROGRESS', 'PROGRESS_RECORDED', 'TASK_PROGRESS_RECORDED', 'TASK_READY_FOR_REVIEW', 'TASK_REVIEW', 'TASK_STATUS_UPDATED', 'INFO'],
+  siteProgress: ['GLASS_ANALYSIS_COMPLETE', 'GLASS_ANALYSIS_COMPLETED', 'AI_ANALYSIS', 'SITE_PROGRESS_UPLOADED', 'NEW_SITE_PROGRESS_UPDATE', 'SITE_PROGRESS_RECORDED'],
+  project: ['PROJECT_UPDATE', 'MILESTONE_UPDATE', 'MILESTONE_UPDATED', 'PROJECT_DELAY_WARNING'],
+  comment: ['COMMENT', 'MENTION', 'COMMENT_MENTION'],
+};
+
+const toNumber = (value: unknown): number | undefined => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+};
+
+const pickNumber = (metadata: NotificationMetadata | null | undefined, keys: string[]) => {
+  if (!metadata) return undefined;
+  for (const key of keys) {
+    const parsed = toNumber(metadata[key]);
+    if (parsed) return parsed;
+  }
+  return undefined;
+};
+
+const normalizeType = (type?: string) => {
+  const mapped = type ? LEGACY_NOTIFICATION_TYPE_MAP[type] || type : '';
+  return String(mapped || '').trim().replace(/-/g, '_').toUpperCase();
+};
+
+const parseReferenceUrl = (referenceUrl?: string | null): NotificationRoute | null => {
+  if (!referenceUrl) return null;
+  const path = referenceUrl.split('?')[0].replace(/^https?:\/\/[^/]+/i, '');
+  const parts = path.split('/').filter(Boolean);
+  const [section, firstId, subSection, secondId] = parts;
+
+  if (section === 'tasks') return { kind: 'task', taskId: toNumber(firstId) };
+  if (section === 'projects') return { kind: 'project', projectId: toNumber(firstId) };
+  if (section === 'inventory') {
+    return {
+      kind: 'inventory',
+      projectId: toNumber(firstId),
+      inventoryItemId: subSection === 'items' ? toNumber(secondId) : undefined,
+    };
+  }
+  if (section === 'site-progress') return { kind: 'site-progress', siteProgressId: toNumber(firstId) };
+  return null;
+};
+
+const titleMatches = (notif: Notification, words: string[]) => {
+  const haystack = `${notif.title} ${notif.message}`.toLowerCase();
+  return words.some((word) => haystack.includes(word));
+};
+
+const buildNotificationRoute = (notif: Notification): NotificationRoute => {
+  const meta = notif.metadata;
+  const type = normalizeType(meta?.type ? String(meta.type) : notif.type);
+  const screen = String(meta?.screen || '').toLowerCase();
+  const projectId = pickNumber(meta, ['project_id', 'projectId']);
+  const taskId = pickNumber(meta, ['task_id', 'taskId']);
+  const inventoryItemId = pickNumber(meta, ['inventory_item_id', 'inventoryItemId', 'item_id', 'itemId']);
+  const siteProgressId = pickNumber(meta, ['site_progress_id', 'siteProgressId']);
+  const commentId = pickNumber(meta, ['comment_id', 'commentId']);
+  const referenceRoute = parseReferenceUrl(notif.reference_url);
+
+  if (referenceRoute?.kind === 'inventory') {
+    return {
+      kind: 'inventory',
+      projectId: referenceRoute.projectId || projectId,
+      inventoryItemId: referenceRoute.inventoryItemId || inventoryItemId,
+    };
+  }
+
+  if (referenceRoute?.kind === 'task') {
+    return { kind: 'task', taskId: referenceRoute.taskId || taskId };
+  }
+
+  if (referenceRoute?.kind === 'project') {
+    return { kind: 'project', projectId: referenceRoute.projectId || projectId };
+  }
+
+  if (referenceRoute?.kind === 'site-progress') {
+    return {
+      kind: 'site-progress',
+      projectId,
+      taskId,
+      siteProgressId: referenceRoute.siteProgressId || siteProgressId,
+    };
+  }
+
+  if (
+    TYPE_GROUPS.inventory.includes(type) ||
+    screen === 'inventory' ||
+    titleMatches(notif, ['critical stock', 'low stock', 'inventory'])
+  ) {
+    return { kind: 'inventory', projectId, inventoryItemId };
+  }
+
+  if (TYPE_GROUPS.comment.includes(type) || commentId) {
+    return { kind: 'comment', taskId, projectId, siteProgressId, commentId };
+  }
+
+  if (TYPE_GROUPS.siteProgress.includes(type) || screen.includes('siteprogress')) {
+    return { kind: 'site-progress', projectId, taskId, siteProgressId };
+  }
+
+  if (TYPE_GROUPS.project.includes(type) || screen.includes('projectdetails')) {
+    return { kind: 'project', projectId };
+  }
+
+  if (TYPE_GROUPS.task.includes(type) || screen.includes('taskdetails') || taskId) {
+    return { kind: 'task', taskId };
+  }
+
+  return { kind: 'unknown' };
+};
+
+export default function Notifications({
+  userId,
+  onNavigateToTask,
+  onNavigateToInventory,
+  onNavigateToProject,
+  onNavigateToSiteProgress,
+  onNavigateToTab,
+}: NotificationsProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -191,24 +336,60 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
       markAsRead(notif.id).catch(err => console.error("Mark as read error:", err));
     }
 
-    const meta = notif.metadata;
+    const route = buildNotificationRoute(notif);
 
-    // 2. Navigation with fallbacks
-    if (meta?.task_id && onNavigateToTask) {
-      onNavigateToTask(meta.task_id);
-    } else if (notif.type === 'alert' && meta?.project_id && onNavigateToInventory) {
-      onNavigateToInventory(meta.project_id);
-    } else if (onNavigateToTab) {
-      // Fallback: If no metadata (old notifications), just go to Task
-      onNavigateToTab('mywork');
+    if (route.kind === 'inventory') {
+      if (onNavigateToInventory) {
+        onNavigateToInventory(route.projectId, route.inventoryItemId);
+      } else {
+        onNavigateToTab?.('home');
+      }
+      return;
     }
+
+    if (route.kind === 'task') {
+      if (route.taskId && onNavigateToTask) onNavigateToTask(route.taskId);
+      else onNavigateToTab?.('mywork');
+      return;
+    }
+
+    if (route.kind === 'site-progress') {
+      if (onNavigateToSiteProgress) {
+        onNavigateToSiteProgress(route.projectId, route.taskId, route.siteProgressId);
+      } else if (route.taskId && onNavigateToTask) {
+        onNavigateToTask(route.taskId);
+      } else if (route.projectId && onNavigateToProject) {
+        onNavigateToProject(route.projectId);
+      } else {
+        onNavigateToTab?.('mywork');
+      }
+      return;
+    }
+
+    if (route.kind === 'project') {
+      if (route.projectId && onNavigateToProject) onNavigateToProject(route.projectId);
+      else onNavigateToTab?.('home');
+      return;
+    }
+
+    if (route.kind === 'comment') {
+      if (route.taskId && onNavigateToTask) onNavigateToTask(route.taskId);
+      else if (route.siteProgressId && onNavigateToSiteProgress) onNavigateToSiteProgress(route.projectId, route.taskId, route.siteProgressId);
+      else if (route.projectId && onNavigateToProject) onNavigateToProject(route.projectId);
+      else onNavigateToTab?.('notifications');
+      return;
+    }
+
+    onNavigateToTab?.('notifications');
   };
 
   const getActionLabel = (notif: Notification) => {
-    const meta = notif.metadata;
-    if (!meta) return 'View details';
-    if (meta.task_id) return 'View task';
-    if (notif.type === 'alert' && meta.project_id) return 'Check inventory';
+    const route = buildNotificationRoute(notif);
+    if (route.kind === 'inventory') return 'Check inventory';
+    if (route.kind === 'task') return 'View task';
+    if (route.kind === 'project') return 'View project';
+    if (route.kind === 'site-progress') return 'View progress';
+    if (route.kind === 'comment') return 'View comment';
     return 'View details';
   };
 
@@ -248,9 +429,13 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
         <View className="flex-row items-center justify-between pb-4 pt-5">
           <View>
             <Text className="text-[24px] font-bold" style={{ color: theme.primary }}>Notifications</Text>
-            <Text className="mt-1 text-[13px]" style={{ color: theme.textMuted }}>
-              {loading ? 'Loading...' : unreadCount > 0 ? `${unreadCount} unread` : 'All caught up!'}
-            </Text>
+            {loading ? (
+              <SkeletonText width={104} height={12} style={{ marginTop: 8 }} />
+            ) : (
+              <Text className="mt-1 text-[13px]" style={{ color: theme.textMuted }}>
+                {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up!'}
+              </Text>
+            )}
           </View>
           <View className="flex-row items-center">
             <TouchableOpacity 
@@ -315,7 +500,11 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
 
 
         {loading ? (
-          <ActivityIndicator color={theme.primary} size="large" className="mt-10" />
+          <View>
+            {Array.from({ length: 5 }).map((_, index) => (
+              <NotificationSkeleton key={index} />
+            ))}
+          </View>
         ) : error ? (
           <View className="mt-20 items-center justify-center">
             <Ionicons name="alert-circle-outline" size={40} color={theme.danger} />

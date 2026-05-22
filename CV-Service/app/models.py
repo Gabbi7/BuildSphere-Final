@@ -142,6 +142,10 @@ class DetectionResponse(BaseModel):
         ...,
         description="NMS IoU threshold used for suppressing overlapping boxes",
     )
+    debug: dict | None = Field(
+        default=None,
+        description="Optional glass counter diagnostics returned only when GLASS_COUNTER_DEBUG=true",
+    )
 
 
 class HealthResponse(BaseModel):

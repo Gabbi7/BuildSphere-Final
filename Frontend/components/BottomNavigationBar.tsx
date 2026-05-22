@@ -39,7 +39,7 @@ export default function BottomNavigationBar({
     <View
       className="absolute left-5 right-5 h-[70px] flex-row items-center justify-between rounded-[30px] px-6"
       style={{
-        bottom: Math.max(insets.bottom + 12, 32),
+        bottom: Math.max(insets.bottom + 4, 22),
         backgroundColor: theme.tabBar,
         ...floatingNavShadow,
       }}>

@@ -4,7 +4,6 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   Platform,
   Dimensions,
 } from 'react-native';
@@ -18,6 +17,7 @@ import TaskDetailScreen from './TaskDetailScreen';
 import { type UserRole } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { MainTab } from '../../components/BottomNavigationBar';
+import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
 
 const { width } = Dimensions.get('window');
 
@@ -45,6 +45,71 @@ interface Props {
 }
 
 const PRIMARY = '#7370FF';
+
+function ProjectDetailSkeleton({ onBack }: { onBack: () => void }) {
+  const { theme } = useAppTheme();
+
+  return (
+    <View className="flex-1" style={{ backgroundColor: theme.background }}>
+      <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 120 }}>
+        <View className="flex-row items-center px-5 pb-4 pt-12">
+          <TouchableOpacity onPress={onBack} className="mr-3 -ml-2 -mt-1">
+            <Ionicons name="caret-back-outline" size={24} color={theme.text} />
+          </TouchableOpacity>
+          <SkeletonText width="62%" height={24} />
+        </View>
+
+        <SkeletonCard style={{ borderRadius: 24, padding: 24 }}>
+          <View className="mb-5 flex-row items-center justify-between">
+            <SkeletonText width="58%" height={19} />
+            <SkeletonBox width={92} height={32} borderRadius={999} />
+          </View>
+          <SkeletonBox width={106} height={30} borderRadius={10} style={{ marginBottom: 24 }} />
+          <View className="mb-6 flex-row">
+            <View className="flex-1">
+              <SkeletonText width={92} height={10} />
+              <SkeletonText width={128} height={13} style={{ marginTop: 10 }} />
+            </View>
+            <View className="flex-1">
+              <SkeletonText width={86} height={10} />
+              <SkeletonText width={92} height={13} style={{ marginTop: 10 }} />
+            </View>
+          </View>
+          <View className="flex-row">
+            <View className="flex-1">
+              <SkeletonText width={58} height={10} />
+              <SkeletonText width={112} height={13} style={{ marginTop: 10 }} />
+            </View>
+            <View className="flex-1">
+              <SkeletonText width={80} height={10} />
+              <SkeletonText width={92} height={13} style={{ marginTop: 10 }} />
+            </View>
+          </View>
+        </SkeletonCard>
+
+        <SkeletonCard style={{ borderRadius: 24, padding: 24 }}>
+          <View className="mb-5 flex-row justify-between">
+            <SkeletonText width={148} height={17} />
+            <SkeletonText width={78} height={10} />
+          </View>
+          <SkeletonBox width={118} height={54} borderRadius={14} style={{ marginBottom: 18 }} />
+          <SkeletonBox height={4} borderRadius={999} />
+        </SkeletonCard>
+
+        <View className="mt-5">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <SkeletonCard key={index} style={{ borderRadius: 20, paddingVertical: 20 }}>
+              <View className="flex-row items-center justify-between">
+                <SkeletonText width={120} height={16} />
+                <SkeletonBox width={24} height={24} borderRadius={12} />
+              </View>
+            </SkeletonCard>
+          ))}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
 
 function statusBadge(status: string) {
   switch ((status || '').toLowerCase()) {
@@ -164,11 +229,7 @@ export default function ProjectDetailScreen({
   }
 
   if (loading) {
-    return (
-      <View className="flex-1 items-center justify-center" style={{ backgroundColor: theme.background }}>
-        <ActivityIndicator color={theme.primary} size="large" />
-      </View>
-    );
+    return <ProjectDetailSkeleton onBack={onBack} />;
   }
   if (error || !project) {
     return (

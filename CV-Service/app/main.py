@@ -43,6 +43,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"  Model: {settings.MODEL_PATH}")
     logger.info(f"  Confidence: {settings.CONFIDENCE_THRESHOLD}")
     logger.info(f"  NMS IoU: {settings.NMS_IOU_THRESHOLD}")
+    logger.info(f"  Duplicate IoU: {settings.DUPLICATE_IOU_THRESHOLD}")
+    logger.info(f"  Min box area ratio: {settings.MIN_BOX_AREA_RATIO}")
+    logger.info(f"  Edge margin: {settings.EDGE_MARGIN}px")
+    logger.info(f"  Glass counter debug: {settings.GLASS_COUNTER_DEBUG}")
     logger.info("=" * 60)
 
     try:
@@ -265,11 +269,11 @@ async def detect_panels(
     try:
         # Step 1: Detect using YOLO
         logger.info(f"CORE AUDIT: Running YOLO Primary Detection ({settings.MODEL_PATH})")
-        result = detector.detect(image)
+        result = detector.detect(image, file_size_bytes=len(contents))
         
         # Step 2: Emergency Fallback to Gemini Vision ONLY if YOLO returns no boxes.
         # If YOLO found partial panels, keep that warning instead of replacing it.
-        if len(result.detections) == 0:
+        if len(result.detections) == 0 and not settings.GLASS_COUNTER_DEBUG:
             logger.warning("YOLO returned no boxes. Attempting Gemini Vision emergency fallback...")
             gemini_boxes = vision_box_fallback(contents)
             
@@ -278,6 +282,8 @@ async def detect_panels(
                 logger.info(f"✅ Gemini Emergency Fallback: {result.total_valid_panels} panels found.")
             else:
                 logger.info("Gemini Fallback also returned 0 detections.")
+        elif len(result.detections) == 0:
+            logger.warning("YOLO returned no boxes. Skipping Gemini fallback because GLASS_COUNTER_DEBUG=true.")
 
         # Step 3: Generate professional audit summary using structured values.
         avg_conf = result.avg_confidence

@@ -25,6 +25,7 @@ import { UserInfo } from '../../App';
 import { hybridGlassAudit, CVDetection, CVAuditResult } from '../../lib/generative-ai';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { SkeletonBox, SkeletonCard, SkeletonText, TaskCardSkeleton } from '../../components/skeletons';
 
 interface Props {
   visible: boolean;
@@ -37,6 +38,9 @@ interface Props {
 interface SelectedPhoto {
   uri: string;
   base64: string | null;
+  width?: number;
+  height?: number;
+  fileSize?: number;
 }
 
 const PRIMARY = '#7370FF';
@@ -67,6 +71,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   const [quantityInstalled, setQuantityInstalled] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [recordSaved, setRecordSaved] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
@@ -103,6 +109,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     setNotes('');
     setGlassCount(0);
     setSaving(false);
+    setHasUnsavedChanges(false);
+    setRecordSaved(false);
     // Reset CV detection state
     setAnalysisStatus('idle');
     setDetectionMode('box');
@@ -116,6 +124,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     setWarningMessage('');
     setAiSummary('');
     setDetections([]);
+  };
+
+  const markDirty = () => {
+    setHasUnsavedChanges(true);
+    setRecordSaved(false);
   };
 
   const loadUserTasks = () => {
@@ -143,20 +156,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   }, [user.id, initialTask]);
 
   const handleClose = () => {
-    // If we're on the success step, just close without alert
-    if (step === 4) {
-      reset();
-      onClose();
-      return;
-    }
-
-    const hasDraft =
-      selectedPhotos.length > 0 ||
-      !!notes.trim() ||
-      verifiedPanelCount > 0 ||
-      step > 1;
-
-    if (!hasDraft) {
+    if (step === 4 || recordSaved || !hasUnsavedChanges) {
       reset();
       onClose();
       return;
@@ -189,7 +189,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: false,
-      quality: 0.8,
+      quality: 1,
       base64: true,
       allowsMultipleSelection: multiple,
       selectionLimit: remainingLimit,
@@ -197,9 +197,13 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     if (!result.canceled && result.assets) {
       const newPhotos = result.assets.map(asset => ({
         uri: asset.uri,
-        base64: asset.base64 || null
+        base64: asset.base64 || null,
+        width: asset.width,
+        height: asset.height,
+        fileSize: asset.fileSize,
       }));
       setSelectedPhotos(prev => [...prev, ...newPhotos]);
+      markDirty();
     }
   };
 
@@ -211,19 +215,24 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     }
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: false,
-      quality: 0.8,
+      quality: 1,
       base64: true,
     });
     if (!result.canceled && result.assets[0]) {
       setSelectedPhotos(prev => [...prev, {
         uri: result.assets[0].uri,
-        base64: result.assets[0].base64 || null
+        base64: result.assets[0].base64 || null,
+        width: result.assets[0].width,
+        height: result.assets[0].height,
+        fileSize: result.assets[0].fileSize,
       }]);
+      markDirty();
     }
   };
 
   const removePhoto = (index: number) => {
     setSelectedPhotos(prev => prev.filter((_, i) => i !== index));
+    markDirty();
   };
 
   const showPhotoOptions = () => {
@@ -254,8 +263,15 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       const filename = currentPhoto.uri.split('/').pop() || 'photo.jpg';
       const ext = (filename.split('.').pop() || 'jpeg').toLowerCase();
       const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+      const fileInfo = await FileSystem.getInfoAsync(currentPhoto.uri);
 
-      console.log(`DEBUG: CV Analysis starting. Mime: ${mimeType}`);
+      console.log(
+        `DEBUG: CV Analysis starting. Mime: ${mimeType}, ` +
+        `pickerSize=${currentPhoto.width || 'unknown'}x${currentPhoto.height || 'unknown'}, ` +
+        `pickerFileSize=${currentPhoto.fileSize || 'unknown'}, ` +
+        `uriFileSize=${fileInfo.exists && 'size' in fileInfo ? fileInfo.size : 'unknown'}, ` +
+        `uri=${currentPhoto.uri}`
+      );
       setAnalysisStatus('analyzing');
 
       const result: CVAuditResult = await hybridGlassAudit(
@@ -263,6 +279,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       );
 
       console.log(`DEBUG: CV Success! Count: ${result.count}, Mode: ${result.detectionMode}`);
+      const summaryText = `${result.count} complete glass panels were detected. Please verify the final count before saving.`;
 
       // ── Populate all detection state ──────────────────────────────
       setAiDetectedCount(result.count);
@@ -276,36 +293,12 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       setHasWarnings(result.hasWarnings);
       setWarningMessage(result.warningMessage || '');
       setDetections(result.detections);
-      setAiSummary(result.summary);
-
-      if (result.annotatedImage) {
-        // Replace the first photo with the CV-annotated version
-        setSelectedPhotos(prev => {
-          const updated = [...prev];
-          updated[0] = { ...updated[0], uri: result.annotatedImage! };
-          return updated;
-        });
-      }
-
-      // Append AI summary to notes
-      const newNotes = notes
-        ? `${notes}\n\n${result.summary}`
-        : result.summary;
-      setNotes(newNotes);
+      setAiSummary(summaryText);
 
       if (result.count === 0) {
         setAnalysisStatus('no_panels');
-        Alert.alert(
-          'No Panels Detected',
-          'AI could not detect any glass panels. You can enter the count manually.',
-        );
       } else {
         setAnalysisStatus('complete');
-
-        Alert.alert(
-          'Analysis Complete',
-          result.summary || `${result.count} complete glass panels were detected. Please verify the final count before saving.`
-        );
       }
 
       setStep(3); // Go to form for human verification
@@ -384,6 +377,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         return;
       }
 
+      setHasUnsavedChanges(false);
+      setRecordSaved(true);
       setStep(4);
     } catch (error) {
       console.error('SAVE_ERROR:', error);
@@ -474,9 +469,13 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 onPress={() => setIsTaskModalVisible(true)}
                 className="mb-4 flex-row items-center justify-between rounded-xl border px-4"
                 style={{ height: 50, backgroundColor: theme.input, borderColor: theme.border }}>
-                <Text style={{ color: taskId ? theme.text : theme.textMuted }}>
-                  {loadingTasks ? 'Loading tasks...' : (userTasks.find(t => String(t.id) === String(taskId))?.title || 'Select a task')}
-                </Text>
+                {loadingTasks ? (
+                  <SkeletonText width="58%" height={13} />
+                ) : (
+                  <Text style={{ color: taskId ? theme.text : theme.textMuted }}>
+                    {userTasks.find(t => String(t.id) === String(taskId))?.title || 'Select a task'}
+                  </Text>
+                )}
                 <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
               </TouchableOpacity>
 
@@ -507,7 +506,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   display="default"
                   onChange={(event, selectedDate) => {
                     setShowDatePicker(false);
-                    if (selectedDate) setWorkDate(selectedDate);
+                    if (selectedDate) {
+                      const changed = selectedDate.toDateString() !== workDate.toDateString();
+                      setWorkDate(selectedDate);
+                      if (changed) markDirty();
+                    }
                   }}
                 />
               )}
@@ -530,21 +533,32 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 
                 <View className="flex-row items-center justify-between bg-white rounded-xl border border-[#E0E0E0] p-3">
                   <TouchableOpacity 
-                    onPress={() => setVerifiedPanelCount(Math.max(0, verifiedPanelCount - 1))}
+                    onPress={() => {
+                      const nextCount = Math.max(0, verifiedPanelCount - 1);
+                      setVerifiedPanelCount(nextCount);
+                      if (nextCount !== verifiedPanelCount) markDirty();
+                    }}
                     className="h-10 w-10 items-center justify-center rounded-full bg-gray-100">
                       <Ionicons name="remove" size={24} color={PRIMARY} />
                   </TouchableOpacity>
                   
                   <TextInput
                     value={String(verifiedPanelCount)}
-                    onChangeText={(v) => setVerifiedPanelCount(parseInt(v) || 0)}
+                    onChangeText={(v) => {
+                      const nextCount = parseInt(v) || 0;
+                      setVerifiedPanelCount(nextCount);
+                      if (nextCount !== verifiedPanelCount) markDirty();
+                    }}
                     keyboardType="numeric"
                     className="text-[24px] font-bold text-[#7370FF] text-center"
                     style={{ minWidth: 60 }}
                   />
                   
                   <TouchableOpacity 
-                    onPress={() => setVerifiedPanelCount(verifiedPanelCount + 1)}
+                    onPress={() => {
+                      setVerifiedPanelCount(verifiedPanelCount + 1);
+                      markDirty();
+                    }}
                     className="h-10 w-10 items-center justify-center rounded-full bg-[#7370FF]">
                       <Ionicons name="add" size={24} color="white" />
                   </TouchableOpacity>
@@ -555,7 +569,10 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               <Text className="mb-1 text-[12px] font-semibold text-[#2D2D2D]">Notes / Comments</Text>
               <TextInput
                 value={notes}
-                onChangeText={setNotes}
+                onChangeText={(value) => {
+                  setNotes(value);
+                  markDirty();
+                }}
                 style={{ ...inputStyle, height: 80, textAlignVertical: 'top', paddingTop: 12 }}
                 placeholder="Add comments about progress..."
                 placeholderTextColor="#C0C0C0"
@@ -663,6 +680,20 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   </Text>
                 </View>
               )}
+              {analyzing && (
+                <SkeletonCard style={{ borderRadius: 16, borderColor: theme.primary, marginBottom: 12 }}>
+                  <View className="mb-3 flex-row items-center">
+                    <SkeletonBox width={34} height={34} borderRadius={17} style={{ marginRight: 10 }} />
+                    <View className="flex-1">
+                      <Text className="text-[13px] font-semibold" style={{ color: theme.primary }}>
+                        {analysisStatus === 'uploading' ? 'Uploading image...' : 'Analyzing image...'}
+                      </Text>
+                      <SkeletonText width="72%" height={10} style={{ marginTop: 8 }} />
+                    </View>
+                  </View>
+                  <SkeletonBox height={72} borderRadius={12} />
+                </SkeletonCard>
+              )}
 
               <TouchableOpacity
                 onPress={() => setStep(3)}
@@ -677,8 +708,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               className="mt-3 h-14 flex-row items-center justify-center rounded-[16px] border-2"
               style={{ backgroundColor: theme.primaryLight, borderColor: theme.primary }}>
                 {analyzing ? (
-                  <View className="flex-row items-center">
-                    <ActivityIndicator color={PRIMARY} />
+                  <View className="flex-row items-center px-4">
                     <Text className="ml-3 text-[14px] font-semibold" style={{ color: theme.primary }}>
                       {analysisStatus === 'uploading' ? 'Uploading image...' : 'Analyzing glass panels...'}
                     </Text>
@@ -730,9 +760,13 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 onPress={() => setIsTaskModalVisible(true)}
                 className="mb-4 flex-row items-center justify-between rounded-xl border px-4"
                 style={{ height: 50, backgroundColor: theme.input, borderColor: theme.border }}>
-                <Text style={{ color: taskId ? theme.text : theme.textMuted }}>
-                  {loadingTasks ? 'Loading...' : (userTasks.find(t => String(t.id) === String(taskId))?.title || 'Select a task')}
-                </Text>
+                {loadingTasks ? (
+                  <SkeletonText width="58%" height={13} />
+                ) : (
+                  <Text style={{ color: taskId ? theme.text : theme.textMuted }}>
+                    {userTasks.find(t => String(t.id) === String(taskId))?.title || 'Select a task'}
+                  </Text>
+                )}
                 <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
               </TouchableOpacity>
 
@@ -763,7 +797,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   display="default"
                   onChange={(event, selectedDate) => {
                     setShowDatePicker(false);
-                    if (selectedDate) setWorkDate(selectedDate);
+                    if (selectedDate) {
+                      const changed = selectedDate.toDateString() !== workDate.toDateString();
+                      setWorkDate(selectedDate);
+                      if (changed) markDirty();
+                    }
                   }}
                 />
               )}
@@ -771,7 +809,10 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               <Text className="mb-1.5 mt-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Notes / Comments</Text>
               <TextInput
                 value={notes}
-                onChangeText={setNotes}
+                onChangeText={(value) => {
+                  setNotes(value);
+                  markDirty();
+                }}
                 style={{ ...inputStyle, height: 100, textAlignVertical: 'top', paddingTop: 12 }}
                 placeholder="Add comments about progress..."
                 placeholderTextColor={theme.textMuted}
@@ -865,7 +906,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   </Text>
                   <View className="flex-row items-center justify-between rounded-xl border p-2 px-4" style={{ backgroundColor: theme.elevated, borderColor: theme.border }}>
                     <TouchableOpacity 
-                      onPress={() => setVerifiedPanelCount(Math.max(0, verifiedPanelCount - 1))}
+                      onPress={() => {
+                        const nextCount = Math.max(0, verifiedPanelCount - 1);
+                        setVerifiedPanelCount(nextCount);
+                        if (nextCount !== verifiedPanelCount) markDirty();
+                      }}
                       className="h-8 w-8 items-center justify-center rounded-full"
                       style={{ backgroundColor: theme.input }}>
                         <Ionicons name="remove" size={20} color={PRIMARY} />
@@ -873,21 +918,28 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                     
                     <TextInput
                       value={String(verifiedPanelCount)}
-                      onChangeText={(v) => setVerifiedPanelCount(parseInt(v) || 0)}
+                      onChangeText={(v) => {
+                        const nextCount = parseInt(v) || 0;
+                        setVerifiedPanelCount(nextCount);
+                        if (nextCount !== verifiedPanelCount) markDirty();
+                      }}
                       keyboardType="numeric"
                       className="text-[20px] font-bold text-center"
                       style={{ minWidth: 50, color: theme.primary }}
                     />
                     
                     <TouchableOpacity 
-                      onPress={() => setVerifiedPanelCount(verifiedPanelCount + 1)}
+                      onPress={() => {
+                        setVerifiedPanelCount(verifiedPanelCount + 1);
+                        markDirty();
+                      }}
                       className="h-8 w-8 items-center justify-center rounded-full"
                       style={{ backgroundColor: theme.primary }}>
                         <Ionicons name="add" size={20} color="white" />
                     </TouchableOpacity>
                   </View>
                   <Text className="mt-1.5 text-center text-[10px]" style={{ color: theme.textMuted }}>
-                    Adjust if the AI count is incorrect
+                    AI count is only a suggestion. Please adjust the verified count if needed.
                   </Text>
                 </View>
               </View>
@@ -956,7 +1008,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
             </View>
 
             {loadingTasks ? (
-              <ActivityIndicator color={PRIMARY} />
+              <View>
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <TaskCardSkeleton key={index} />
+                ))}
+              </View>
             ) : tasksError ? (
               <View className="items-center py-10">
                 <Ionicons name="alert-circle-outline" size={28} color="#FF6B6B" />
@@ -973,9 +1029,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   <TouchableOpacity
                     key={t.id}
                     onPress={() => {
+                      const changed = String(taskId) !== String(t.id) || String(projectId) !== String(t.project_id);
                       setTaskId(t.id);
                       setProjectId(t.project_id);
                       setIsTaskModalVisible(false);
+                      if (changed) markDirty();
                     }}
                     className="mb-3 flex-row items-center rounded-xl border p-4"
                     style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
@@ -1012,8 +1070,10 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               <TouchableOpacity
                 key={item}
                 onPress={() => {
+                  const changed = shift !== item;
                   setShift(item);
                   setIsShiftModalVisible(false);
+                  if (changed) markDirty();
                 }}
                 className="mb-3 flex-row items-center rounded-xl border p-4"
                 style={{ backgroundColor: theme.surface, borderColor: theme.border }}>

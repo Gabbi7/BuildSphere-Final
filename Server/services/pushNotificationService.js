@@ -55,6 +55,19 @@ async function ensureNotificationTables() {
     )
   `);
 
+  await pool.query(`
+    ALTER TABLE notifications
+      ADD COLUMN IF NOT EXISTS message TEXT,
+      ADD COLUMN IF NOT EXISTS body TEXT,
+      ADD COLUMN IF NOT EXISTS type TEXT,
+      ADD COLUMN IF NOT EXISTS data JSONB,
+      ADD COLUMN IF NOT EXISTS reference_url TEXT,
+      ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS date TEXT,
+      ADD COLUMN IF NOT EXISTS time TEXT,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()
+  `);
+
   notificationSchemaReady = true;
 }
 
@@ -63,9 +76,19 @@ async function ensureNotificationTables() {
  */
 function buildReferenceUrl(data) {
   if (!data) return null;
-  if (data.task_id) return `/tasks/${data.task_id}`;
-  if (data.project_id && data.screen === 'Inventory') return `/inventory/${data.project_id}`;
-  if (data.project_id) return `/projects/${data.project_id}`;
+  const projectId = data.project_id || data.projectId;
+  const taskId = data.task_id || data.taskId;
+  const siteProgressId = data.site_progress_id || data.siteProgressId;
+  const inventoryItemId = data.inventory_item_id || data.inventoryItemId || data.item_id || data.itemId;
+  const screen = String(data.screen || '').toLowerCase();
+  const type = String(data.type || '').toUpperCase();
+  const isInventoryTarget = screen === 'inventory' || type.includes('STOCK') || type.includes('INVENTORY');
+
+  if (projectId && inventoryItemId && isInventoryTarget) return `/inventory/${projectId}/items/${inventoryItemId}`;
+  if (projectId && isInventoryTarget) return `/inventory/${projectId}`;
+  if (siteProgressId) return `/site-progress/${siteProgressId}`;
+  if (taskId) return `/tasks/${taskId}`;
+  if (projectId) return `/projects/${projectId}`;
   return null;
 }
 
@@ -90,11 +113,10 @@ async function saveNotificationHistory(userId, title, body, type, data) {
     const referenceUrl = buildReferenceUrl(data);
     const { date, time } = formatLegacyTimestamps();
 
-    // Matching actual schema: user_id, title, message, type, is_read, date, time, reference_url, created_at
     await pool.query(
-      `INSERT INTO notifications (user_id, title, message, type, is_read, date, time, reference_url, created_at)
-       VALUES ($1, $2, $3, $4, false, $5, $6, $7, NOW())`,
-      [userId, title, body, type || null, date, time, referenceUrl]
+      `INSERT INTO notifications (user_id, title, message, body, type, data, is_read, date, time, reference_url, created_at)
+       VALUES ($1, $2, $3, $3, $4, $5, false, $6, $7, $8, NOW())`,
+      [userId, title, body, type || null, data || null, date, time, referenceUrl]
     );
   } catch (err) {
     console.error('Failed to save notification history:', err.message);

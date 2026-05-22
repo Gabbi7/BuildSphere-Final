@@ -25,6 +25,21 @@ interface EditProfileScreenProps {
 
 const PRIMARY = '#7370FF';
 
+function parseDateOnly(value?: string | null) {
+  if (!value) return null;
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function formatDateOnly(date: Date | null) {
+  if (!date) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export default function EditProfileScreen({ user, onBack, onSaved }: EditProfileScreenProps) {
   const [firstName, setFirstName] = useState(user.firstName);
   const [middleName, setMiddleName] = useState(user.middleName || '');
@@ -32,7 +47,7 @@ export default function EditProfileScreen({ user, onBack, onSaved }: EditProfile
   const [suffix, setSuffix] = useState(user.suffix || '');
   const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber || '');
   const [gender, setGender] = useState(user.gender || 'Prefer not to say');
-  const [birthdate, setBirthdate] = useState<Date | null>(user.birthdate ? new Date(user.birthdate) : null);
+  const [birthdate, setBirthdate] = useState<Date | null>(parseDateOnly(user.birthdate));
   const [address, setAddress] = useState(user.address || '');
   const [department, setDepartment] = useState(user.department || '');
   const [position, setPosition] = useState(user.position || '');
@@ -47,7 +62,7 @@ export default function EditProfileScreen({ user, onBack, onSaved }: EditProfile
     suffix !== (user.suffix || '') ||
     phoneNumber !== (user.phoneNumber || '') ||
     gender !== (user.gender || 'Prefer not to say') ||
-    (birthdate ? birthdate.toISOString().slice(0, 10) : '') !== (user.birthdate || '') ||
+    formatDateOnly(birthdate) !== (user.birthdate || '') ||
     address !== (user.address || '') ||
     department !== (user.department || '') ||
     position !== (user.position || '') ||
@@ -170,7 +185,7 @@ export default function EditProfileScreen({ user, onBack, onSaved }: EditProfile
           suffix,
           phoneNumber,
           gender,
-          birthdate: birthdate ? birthdate.toISOString().slice(0, 10) : null,
+          birthdate: birthdate ? formatDateOnly(birthdate) : null,
           address,
           department,
           position,

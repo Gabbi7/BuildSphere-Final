@@ -5,7 +5,7 @@ import LoginScreen from './screens/auth/LoginScreen';
 import ForgotPasswordScreen, { PASSWORD_RESET_REDIRECT_URL } from './screens/auth/ForgotPasswordScreen';
 import ResetPasswordScreen from './screens/auth/ResetPasswordScreen';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, Platform } from 'react-native';
+import { View, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { UserRole } from './constants/roles';
@@ -15,6 +15,7 @@ import { API_URL } from './lib/api';
 import { supabase } from './lib/supabase';
 import { addNotificationListeners, registerForPushNotificationsAsync } from './lib/notifications';
 import { BuildSphereThemeProvider, useAppTheme } from './contexts/ThemeContext';
+import { SkeletonBox, SkeletonCard, SkeletonText } from './components/skeletons';
 
 export interface UserInfo {
   id: number;
@@ -225,8 +226,18 @@ function AppContent() {
   if (loading) {
     return (
       <SafeAreaProvider>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.background }}>
-          <ActivityIndicator size="large" color={theme.primary} />
+        <View style={{ flex: 1, justifyContent: 'center', padding: 24, backgroundColor: theme.background }}>
+          <View style={{ alignItems: 'center', marginBottom: 28 }}>
+            <SkeletonBox width={72} height={72} borderRadius={20} />
+            <SkeletonText width={180} height={18} style={{ marginTop: 18 }} />
+            <SkeletonText width={130} height={12} style={{ marginTop: 10 }} />
+          </View>
+          <SkeletonCard style={{ borderRadius: 24, padding: 22 }}>
+            <SkeletonText width="48%" height={16} />
+            <SkeletonBox height={48} borderRadius={14} style={{ marginTop: 18 }} />
+            <SkeletonBox height={48} borderRadius={14} style={{ marginTop: 12 }} />
+            <SkeletonBox height={52} borderRadius={16} style={{ marginTop: 22 }} />
+          </SkeletonCard>
         </View>
       </SafeAreaProvider>
     );

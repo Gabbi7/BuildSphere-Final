@@ -1,21 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   Modal,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { SkeletonBox, TaskCardSkeleton } from '../../components/skeletons';
 
 interface Task {
   id: number;
   title: string;
   project: string;
+  project_id?: number;
   due_date: string;
   status: string;
   priority: string;
@@ -26,9 +27,20 @@ interface Task {
   start_date?: string;
 }
 
+interface ProjectFilterOption {
+  id: number;
+  name: string;
+  color?: string;
+  status?: string;
+}
+
 interface MyWorkProps {
   userId: number;
   onTaskSelect: (task: Task) => void;
+  projects?: ProjectFilterOption[];
+  projectsLoading?: boolean;
+  projectsError?: string | null;
+  onRetryProjects?: () => void;
 }
 
 type Tab = 'To Do' | 'In Progress' | 'To Review' | 'Completed';
@@ -40,7 +52,14 @@ const STATUS_MAP: Record<Tab, string> = {
   Completed: 'completed',
 };
 
-export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
+export default function MyWork({
+  userId,
+  onTaskSelect,
+  projects = [],
+  projectsLoading = false,
+  projectsError = null,
+  onRetryProjects,
+}: MyWorkProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('In Progress');
@@ -79,8 +98,35 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
     loadTasks();
   }, [userId]);
 
-  // Unique projects for filtering
-  const projectList = ['All', ...new Set(tasks.map(t => t.project).filter(Boolean))];
+  const projectList = useMemo(() => {
+    const byId = new Map<number, ProjectFilterOption>();
+    const byName = new Map<string, ProjectFilterOption>();
+
+    projects.forEach((project) => {
+      if (!project?.name) return;
+      if (Number.isFinite(Number(project.id))) {
+        byId.set(Number(project.id), project);
+      } else {
+        byName.set(project.name, project);
+      }
+    });
+
+    tasks.forEach((task) => {
+      if (!task.project) return;
+      const taskProjectId = Number(task.project_id);
+      if (Number.isFinite(taskProjectId) && taskProjectId > 0) {
+        if (!byId.has(taskProjectId)) {
+          byId.set(taskProjectId, { id: taskProjectId, name: task.project });
+        }
+        return;
+      }
+      if (![...byId.values()].some((project) => project.name === task.project)) {
+        byName.set(task.project, { id: -byName.size - 1, name: task.project });
+      }
+    });
+
+    return [...byId.values(), ...byName.values()];
+  }, [projects, tasks]);
 
   const getTabCount = (tab: Tab) => {
     if (!Array.isArray(tasks)) return 0;
@@ -184,9 +230,13 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
                     ? { backgroundColor: theme.surface, borderColor: tab.color, shadowColor: tab.color, shadowOpacity: 0.1, shadowRadius: 10, elevation: 2 }
                     : { backgroundColor: theme.surface, borderColor: theme.border }
                 }>
-                <Text className={`mb-1 text-[28px] font-bold`} style={{ color: tab.color }}>
-                  {count}
-                </Text>
+                {loading ? (
+                  <SkeletonBox width={34} height={32} borderRadius={10} style={{ marginBottom: 4 }} />
+                ) : (
+                  <Text className={`mb-1 text-[28px] font-bold`} style={{ color: tab.color }}>
+                    {count}
+                  </Text>
+                )}
                 <Text
                   className={`text-[11px] font-semibold ${isActive ? tab.color : '#A3A3A3'}`}
                   style={{ color: isActive ? tab.color : theme.textMuted }}>
@@ -237,7 +287,11 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}>
         {loading ? (
-          <ActivityIndicator color={theme.primary} style={{ marginTop: 40 }} />
+          <View style={{ marginTop: 4 }}>
+            {Array.from({ length: 5 }).map((_, index) => (
+              <TaskCardSkeleton key={index} />
+            ))}
+          </View>
         ) : error ? (
           <View className="mt-20 items-center justify-center">
             <Ionicons name="alert-circle-outline" size={40} color={theme.danger} />
@@ -322,27 +376,76 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
             <Text className="text-xl font-bold mb-6 text-center" style={{ color: theme.text }}>Select Project</Text>
             
             <ScrollView showsVerticalScrollIndicator={false}>
-              {projectList.map((proj) => (
-                <TouchableOpacity
-                  key={proj}
-                  onPress={() => {
-                    setSelectedProject(proj);
-                    setShowProjectModal(false);
-                  }}
-                  className={`flex-row items-center justify-between py-4 border-b ${selectedProject === proj ? '-mx-6 px-6' : ''}`}
-                  style={{ borderColor: theme.border, backgroundColor: selectedProject === proj ? theme.primaryLight : 'transparent' }}
-                >
-                  <View className="flex-row items-center">
-                    <View className="w-2 h-2 rounded-full mr-3" style={{ backgroundColor: selectedProject === proj ? theme.primary : theme.border }} />
-                    <Text className={`text-base ${selectedProject === proj ? 'font-bold' : ''}`} style={{ color: selectedProject === proj ? theme.primary : theme.text }}>
-                      {proj === 'All' ? 'All Projects' : proj}
-                    </Text>
-                  </View>
-                  {selectedProject === proj && (
-                    <Ionicons name="checkmark-sharp" size={20} color={theme.primary} />
+              <TouchableOpacity
+                onPress={() => {
+                  setSelectedProject('All');
+                  setShowProjectModal(false);
+                }}
+                className={`flex-row items-center justify-between py-4 border-b ${selectedProject === 'All' ? '-mx-6 px-6' : ''}`}
+                style={{ borderColor: theme.border, backgroundColor: selectedProject === 'All' ? theme.primaryLight : 'transparent' }}
+              >
+                <View className="flex-row items-center">
+                  <View className="w-2 h-2 rounded-full mr-3" style={{ backgroundColor: selectedProject === 'All' ? theme.primary : theme.border }} />
+                  <Text className={`text-base ${selectedProject === 'All' ? 'font-bold' : ''}`} style={{ color: selectedProject === 'All' ? theme.primary : theme.text }}>
+                    All Projects
+                  </Text>
+                </View>
+                {selectedProject === 'All' && (
+                  <Ionicons name="checkmark-sharp" size={20} color={theme.primary} />
+                )}
+              </TouchableOpacity>
+
+              {projectsLoading ? (
+                <View className="py-6">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <View key={index} className="mb-4 flex-row items-center">
+                      <SkeletonBox width={10} height={10} borderRadius={5} style={{ marginRight: 12 }} />
+                      <SkeletonBox width="70%" height={18} borderRadius={9} />
+                    </View>
+                  ))}
+                </View>
+              ) : projectsError ? (
+                <View className="items-center py-8">
+                  <Ionicons name="alert-circle-outline" size={30} color={theme.danger} />
+                  <Text className="mt-2 text-center text-[13px]" style={{ color: theme.textSecondary }}>
+                    Could not load projects.
+                  </Text>
+                  {onRetryProjects && (
+                    <TouchableOpacity onPress={onRetryProjects} className="mt-3 rounded-lg px-4 py-2" style={{ backgroundColor: theme.primary }}>
+                      <Text className="text-[12px] font-semibold text-white">Retry</Text>
+                    </TouchableOpacity>
                   )}
-                </TouchableOpacity>
-              ))}
+                </View>
+              ) : (
+                projectList.map((project) => (
+                  <TouchableOpacity
+                    key={`${project.id}-${project.name}`}
+                    onPress={() => {
+                      setSelectedProject(project.name);
+                      setShowProjectModal(false);
+                    }}
+                    className={`flex-row items-center justify-between py-4 border-b ${selectedProject === project.name ? '-mx-6 px-6' : ''}`}
+                    style={{ borderColor: theme.border, backgroundColor: selectedProject === project.name ? theme.primaryLight : 'transparent' }}
+                  >
+                    <View className="flex-1 flex-row items-center">
+                      <View className="w-2.5 h-2.5 rounded-full mr-3" style={{ backgroundColor: project.color || theme.border }} />
+                      <View className="flex-1">
+                        <Text className={`text-base ${selectedProject === project.name ? 'font-bold' : ''}`} style={{ color: selectedProject === project.name ? theme.primary : theme.text }} numberOfLines={1}>
+                          {project.name}
+                        </Text>
+                        {!!project.status && (
+                          <Text className="mt-0.5 text-[11px] uppercase" style={{ color: theme.textMuted }} numberOfLines={1}>
+                            {project.status}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                    {selectedProject === project.name && (
+                      <Ionicons name="checkmark-sharp" size={20} color={theme.primary} />
+                    )}
+                  </TouchableOpacity>
+                ))
+              )}
             </ScrollView>
 
             <TouchableOpacity 

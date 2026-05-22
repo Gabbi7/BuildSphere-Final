@@ -10,13 +10,16 @@ import {
   Alert,
   Platform,
   KeyboardAvoidingView,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
 import { getPermissions, type UserRole } from '../../constants/roles';
-import { ACTION_TYPES, ACTION_TYPE_LABELS, ACTION_TYPE_COLORS, type ActionType } from '../../constants/constants';
+import { ACTION_TYPE_LABELS, ACTION_TYPE_COLORS } from '../../constants/constants';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
+import { InventoryItemSkeleton, InventoryLogSkeleton } from '../../components/skeletons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface InventoryItem {
   id: number;
@@ -53,6 +56,7 @@ interface Props {
   unreadCount?: number;
   onNavigate?: (tab: MainTab) => void;
   showBottomNav?: boolean;
+  highlightItemId?: number | null;
 }
 
 function stockStatus(qty: number | string, critical: number | string): { label: string; bg: string } {
@@ -80,9 +84,8 @@ const ACTION_LABELS: Record<string, string> = {
   correction: 'Corrected',
 };
 
-const MOBILE_ACTION_TYPES = ACTION_TYPES.filter(
-  (action) => action !== 'ADJUSTMENT'
-) as Exclude<ActionType, 'ADJUSTMENT'>[];
+const MOBILE_ACTION_TYPES = ['RECEIVING', 'CONSUMPTION', 'SPOILAGE'] as const;
+type MobileActionType = (typeof MOBILE_ACTION_TYPES)[number];
 
 export default function InventoryScreen({
   projectId,
@@ -94,11 +97,13 @@ export default function InventoryScreen({
   unreadCount = 0,
   onNavigate,
   showBottomNav = false,
+  highlightItemId = null,
 }: Props) {
   const perms = getPermissions(userRole);
   const canEdit = perms.canEditInventory;
   const canAdd = perms.canAddInventory;
   const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
 
   const [activeTab, setActiveTab] = useState<'items' | 'logs'>('items');
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -126,14 +131,14 @@ export default function InventoryScreen({
   // Transaction modal state
   const [showTransaction, setShowTransaction] = useState(false);
   const [txnItem, setTxnItem] = useState<InventoryItem | null>(null);
-  const [txnAction, setTxnAction] = useState<ActionType>('RECEIVING');
+  const [txnAction, setTxnAction] = useState<MobileActionType>('RECEIVING');
   const [txnQty, setTxnQty] = useState('');
   const [txnNotes, setTxnNotes] = useState('');
   const [txnTaskId, setTxnTaskId] = useState('');
   const [projectTasks, setProjectTasks] = useState<{id: number; title: string}[]>([]);
   const [showAddLog, setShowAddLog] = useState(false);
   const [logItemId, setLogItemId] = useState('');
-  const [logActionType, setLogActionType] = useState<ActionType>('RECEIVING');
+  const [logActionType, setLogActionType] = useState<MobileActionType>('RECEIVING');
   const [logQty, setLogQty] = useState('');
   const [logNotes, setLogNotes] = useState('');
   const [logTaskId, setLogTaskId] = useState('');
@@ -158,9 +163,9 @@ export default function InventoryScreen({
     return response.json();
   };
 
-  const load = async () => {
+  const load = async (showSkeleton = true) => {
     setError(null);
-    setLoading(true);
+    if (showSkeleton) setLoading(true);
     try {
       const [itemsData, logsData] = await Promise.all([fetchItems(), fetchLogs()]);
       setItems(Array.isArray(itemsData) ? itemsData : []);
@@ -168,14 +173,14 @@ export default function InventoryScreen({
     } catch (err: any) {
       setError(err?.message || 'Could not load inventory data.');
     } finally {
-      setLoading(false);
+      if (showSkeleton) setLoading(false);
     }
   };
 
   const refresh = async () => {
     setRefreshing(true);
     try {
-      await load();
+      await load(false);
     } finally {
       setRefreshing(false);
     }
@@ -199,8 +204,112 @@ export default function InventoryScreen({
     fetchTasks();
   }, [projectId, selectedAction]);
 
-  const handleAdd = async () => {
-    if (!addName.trim()) return Alert.alert('Required', 'Item name is required.');
+  useEffect(() => {
+    if (highlightItemId) {
+      setActiveTab('items');
+    }
+  }, [highlightItemId]);
+
+  const resetAddItemForm = () => {
+    setShowItemPicker(false);
+    setAddName('');
+    setAddCategory('Materials');
+    setAddQty('');
+    setAddCritical('');
+    setAddPrice('');
+    setAddUnit('pcs');
+  };
+
+  const resetTransactionForm = () => {
+    setTxnItem(null);
+    setTxnAction('RECEIVING');
+    setTxnQty('');
+    setTxnNotes('');
+    setTxnTaskId('');
+  };
+
+  const resetAddLogForm = () => {
+    setLogItemId('');
+    setLogActionType('RECEIVING');
+    setLogQty('');
+    setLogNotes('');
+    setLogTaskId('');
+  };
+
+  const hasAddItemDraft = () =>
+    Boolean(
+      addName.trim() ||
+      addQty.trim() ||
+      addCritical.trim() ||
+      addPrice.trim() ||
+      addCategory !== 'Materials' ||
+      addUnit !== 'pcs'
+    );
+
+  const hasTransactionDraft = () =>
+    Boolean(txnItem || txnAction !== 'RECEIVING' || txnQty.trim() || txnNotes.trim() || txnTaskId);
+
+  const hasAddLogDraft = () =>
+    Boolean(logItemId || logActionType !== 'RECEIVING' || logQty.trim() || logNotes.trim() || logTaskId);
+
+  const confirmDiscard = (hasDraft: boolean, onDiscard: () => void) => {
+    if (!hasDraft) {
+      onDiscard();
+      return;
+    }
+
+    Alert.alert(
+      'Discard changes?',
+      'Your entered inventory details will not be saved.',
+      [
+        { text: 'Continue Editing', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: onDiscard },
+      ]
+    );
+  };
+
+  const closeAddItemModal = () => {
+    confirmDiscard(hasAddItemDraft(), () => {
+      setShowAdd(false);
+      resetAddItemForm();
+    });
+  };
+
+  const closeTransactionModal = () => {
+    confirmDiscard(hasTransactionDraft(), () => {
+      setShowTransaction(false);
+      resetTransactionForm();
+    });
+  };
+
+  const closeAddLogModal = () => {
+    confirmDiscard(hasAddLogDraft(), () => {
+      setShowAddLog(false);
+      resetAddLogForm();
+    });
+  };
+
+  const getTransactionConfirmation = (action: MobileActionType) => {
+    switch (action) {
+      case 'CONSUMPTION':
+        return {
+          title: 'Confirm material consumption?',
+          message: 'This will reduce stock, link to the selected task, and cannot be edited after saving.',
+        };
+      case 'SPOILAGE':
+        return {
+          title: 'Confirm spoilage transaction?',
+          message: 'This will reduce stock and cannot be edited after saving.',
+        };
+      default:
+        return {
+          title: 'Confirm receiving transaction?',
+          message: 'This will increase stock and the inventory log cannot be edited after saving.',
+        };
+    }
+  };
+
+  const submitAdd = async () => {
     setSaving(true);
     try {
       const res = await fetch(`${API_URL}/inventory`, {
@@ -220,16 +329,29 @@ export default function InventoryScreen({
       if (!res.ok) throw new Error('Unable to add inventory item.');
       Alert.alert('Success', 'Inventory item added.');
       setShowAdd(false);
-      setAddName('');
-      setAddQty('');
-      setAddCritical('');
-      setAddPrice('');
+      resetAddItemForm();
       await load();
     } catch (err: any) {
       Alert.alert('Error', err?.message || 'Failed to add item.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleAdd = async () => {
+    if (!addName.trim()) return Alert.alert('Required', 'Item name is required.');
+    const qty = Number(addQty);
+    if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
+    if (!addUnit.trim()) return Alert.alert('Required', 'Unit is required.');
+
+    Alert.alert(
+      'Confirm inventory item?',
+      'Please review the details before saving.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Confirm Save', onPress: submitAdd },
+      ]
+    );
   };
 
   const handleUpdate = async () => {
@@ -256,13 +378,8 @@ export default function InventoryScreen({
   };
 
   // ── Phase 2: Record Transaction (replaces direct stock edits) ──
-  const handleTransaction = async () => {
+  const submitTransaction = async () => {
     if (!txnItem) return;
-    const qty = Number(txnQty);
-    if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
-    if (txnAction === 'CONSUMPTION' && !txnTaskId) {
-      return Alert.alert('Task Required', 'You must select a task for material consumption.');
-    }
     setSaving(true);
     try {
       const res = await fetch(`${API_URL}/inventory/${txnItem.id}/transaction`, {
@@ -270,7 +387,7 @@ export default function InventoryScreen({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action_type: txnAction,
-          quantity: qty,
+          quantity: Number(txnQty),
           reference_task_id: txnAction === 'CONSUMPTION' ? txnTaskId : undefined,
           notes: txnNotes || undefined,
           created_by: userId,
@@ -282,13 +399,28 @@ export default function InventoryScreen({
       }
       Alert.alert('Success', `${ACTION_TYPE_LABELS[txnAction]} recorded.`);
       setShowTransaction(false);
-      setTxnQty(''); setTxnNotes(''); setTxnTaskId('');
+      resetTransactionForm();
       await load();
     } catch (err: any) {
       Alert.alert('Error', err?.message || 'Failed to record transaction.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleTransaction = async () => {
+    if (!txnItem) return;
+    const qty = Number(txnQty);
+    if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
+    if (txnAction === 'CONSUMPTION' && !txnTaskId) {
+      return Alert.alert('Task Required', 'You must select a task for material consumption.');
+    }
+
+    const confirmation = getTransactionConfirmation(txnAction);
+    Alert.alert(confirmation.title, confirmation.message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Confirm', onPress: submitTransaction },
+    ]);
   };
 
   const handleDelete = (id: number) => {
@@ -315,15 +447,7 @@ export default function InventoryScreen({
     ]);
   };
 
-  const handleAddLog = async () => {
-    if (!logItemId || !logQty) {
-      return Alert.alert('Required', 'Please select item and quantity.');
-    }
-    const qty = Number(logQty);
-    if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
-    if (logActionType === 'CONSUMPTION' && !logTaskId) {
-      return Alert.alert('Task Required', 'You must select a task for material consumption.');
-    }
+  const submitAddLog = async () => {
     setSaving(true);
     try {
       const res = await fetch(`${API_URL}/inventory/${logItemId}/transaction`, {
@@ -331,7 +455,7 @@ export default function InventoryScreen({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action_type: logActionType,
-          quantity: qty,
+          quantity: Number(logQty),
           reference_task_id: logActionType === 'CONSUMPTION' ? logTaskId : undefined,
           notes: logNotes || undefined,
           created_by: userId,
@@ -343,13 +467,30 @@ export default function InventoryScreen({
       }
       Alert.alert('Success', `${ACTION_TYPE_LABELS[logActionType]} recorded.`);
       setShowAddLog(false);
-      setLogItemId(''); setLogQty(''); setLogNotes(''); setLogTaskId('');
+      resetAddLogForm();
       await load();
     } catch (err: any) {
       Alert.alert('Error', err?.message || 'Failed to create transaction.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleAddLog = async () => {
+    if (!logItemId || !logQty) {
+      return Alert.alert('Required', 'Please select item and quantity.');
+    }
+    const qty = Number(logQty);
+    if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
+    if (logActionType === 'CONSUMPTION' && !logTaskId) {
+      return Alert.alert('Task Required', 'You must select a task for material consumption.');
+    }
+
+    const confirmation = getTransactionConfirmation(logActionType);
+    Alert.alert(confirmation.title, confirmation.message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Confirm', onPress: submitAddLog },
+    ]);
   };
 
   const filteredItems = useMemo(
@@ -389,15 +530,17 @@ export default function InventoryScreen({
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
-      <View className="flex-row items-center px-5 pb-3 pt-12">
-        <TouchableOpacity onPress={onBack} className="mr-3 -ml-2 -mt-1">
+      <View
+        className="flex-row items-center px-5 pb-3"
+        style={{ paddingTop: Math.max(insets.top + 4, 44) }}>
+        <TouchableOpacity onPress={onBack} className="mr-3 -ml-2">
           <Ionicons name="caret-back-outline" size={24} color={theme.text} />
         </TouchableOpacity>
         <Text className="text-[26px] font-bold" style={{ color: theme.primary }}>Inventory</Text>
       </View>
 
       <View className="px-5 pb-3">
-        <View className="mb-3 flex-row rounded-full border p-1" style={{ backgroundColor: theme.input, borderColor: theme.border }}>
+        <View className="mb-2 flex-row rounded-full border p-1" style={{ backgroundColor: theme.input, borderColor: theme.border }}>
           <TouchableOpacity
             className="flex-1 rounded-full py-2"
             style={{ backgroundColor: activeTab === 'items' ? theme.primary : 'transparent' }}
@@ -474,12 +617,16 @@ export default function InventoryScreen({
       )}
 
       {loading ? (
-        <ActivityIndicator color={theme.primary} size="large" className="mt-12" />
+        <ScrollView contentContainerStyle={{ paddingBottom: showBottomNav ? 150 : 110 }} className="px-5">
+          {activeTab === 'items'
+            ? Array.from({ length: 5 }).map((_, index) => <InventoryItemSkeleton key={index} />)
+            : Array.from({ length: 4 }).map((_, index) => <InventoryLogSkeleton key={index} />)}
+        </ScrollView>
       ) : error ? (
         <View className="mt-12 items-center px-8">
           <Ionicons name="alert-circle-outline" size={40} color={theme.danger} />
           <Text className="mt-3 text-center" style={{ color: theme.textSecondary }}>{error}</Text>
-          <TouchableOpacity onPress={load} className="mt-4 rounded-lg px-4 py-2" style={{ backgroundColor: theme.primary }}>
+          <TouchableOpacity onPress={() => load()} className="mt-4 rounded-lg px-4 py-2" style={{ backgroundColor: theme.primary }}>
             <Text className="font-semibold text-white">Retry</Text>
           </TouchableOpacity>
         </View>
@@ -498,11 +645,19 @@ export default function InventoryScreen({
             ) : (
               filteredItems.map((item) => {
                 const status = stockStatus(item.quantity, item.critical_level);
+                const isHighlighted = String(item.id) === String(highlightItemId);
                 return (
                   <TouchableOpacity
                     key={item.id}
-                    className="mb-3 rounded-2xl p-4"
-                    style={{ backgroundColor: theme.surface, shadowColor: theme.shadow, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 }}
+                    className="mb-3 rounded-2xl border p-4"
+                    style={{
+                      backgroundColor: isHighlighted ? theme.primaryLight : theme.surface,
+                      borderColor: isHighlighted ? theme.warning : theme.border,
+                      shadowColor: theme.shadow,
+                      shadowOpacity: 0.05,
+                      shadowRadius: 8,
+                      elevation: 2,
+                    }}
                     onPress={() => {
                       if (!canEdit) return;
                       Alert.alert(item.item_name, 'Choose action', [
@@ -635,32 +790,44 @@ export default function InventoryScreen({
             ))}
         </ScrollView>
       )}
-        <Modal visible={showAdd} transparent animationType="slide" onRequestClose={() => setShowAdd(false)}>
+        <Modal visible={showAdd} transparent animationType="slide" onRequestClose={closeAddItemModal}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 justify-center px-6" style={{ backgroundColor: theme.overlay }}>
-            <View className="rounded-3xl p-6" style={{ backgroundColor: theme.elevated }}>
-              <Text className="mb-4 text-center text-[18px] font-bold" style={{ color: theme.primary }}>Add Inventory Item</Text>
-              <TouchableOpacity onPress={() => setShowItemPicker((prev) => !prev)} style={inputStyle} className="flex-row items-center justify-between">
-                <Text style={{ color: addName ? theme.text : theme.textMuted }}>{addName || 'Select item...'}</Text>
-                <Ionicons name={showItemPicker ? 'chevron-up' : 'chevron-down'} size={20} color={theme.primary} />
-              </TouchableOpacity>
-              {showItemPicker && (
-                <View className="mb-2 overflow-hidden rounded-xl border" style={{ borderColor: theme.border }}>
-                  {Object.keys(PREDEFINED_ITEMS).map((name) => (
-                    <TouchableOpacity key={name} className="border-b px-4 py-3" style={{ borderBottomColor: theme.border }} onPress={() => { setAddName(name); setAddCategory(PREDEFINED_ITEMS[name]); setShowItemPicker(false); }}>
-                      <Text style={{ color: theme.text }}>{name}</Text>
-                    </TouchableOpacity>
-                  ))}
+            <TouchableOpacity activeOpacity={1} onPress={closeAddItemModal} className="absolute inset-0" />
+            <TouchableWithoutFeedback>
+              <View className="max-h-[86%] rounded-3xl" style={{ backgroundColor: theme.elevated }}>
+                <View className="flex-row items-center justify-between border-b px-6 py-4" style={{ borderColor: theme.border }}>
+                  <Text className="text-[18px] font-bold" style={{ color: theme.primary }}>Add Inventory Item</Text>
+                  <TouchableOpacity onPress={closeAddItemModal} className="h-9 w-9 items-center justify-center rounded-full" style={{ backgroundColor: theme.input }}>
+                    <Ionicons name="close" size={20} color={theme.text} />
+                  </TouchableOpacity>
                 </View>
-              )}
-              <TextInput value={addCategory} onChangeText={setAddCategory} style={inputStyle} placeholder="Category" placeholderTextColor={theme.textMuted} />
-              <TextInput value={addUnit} onChangeText={setAddUnit} style={inputStyle} placeholder="Unit (e.g. pcs, bag)" placeholderTextColor={theme.textMuted} />
-              <TextInput value={addPrice} onChangeText={setAddPrice} style={inputStyle} placeholder="Price" keyboardType="numeric" placeholderTextColor={theme.textMuted} />
-              <TextInput value={addCritical} onChangeText={setAddCritical} style={inputStyle} placeholder="Critical level" keyboardType="numeric" placeholderTextColor={theme.textMuted} />
-              <TextInput value={addQty} onChangeText={setAddQty} style={inputStyle} placeholder="Current stock" keyboardType="numeric" placeholderTextColor={theme.textMuted} />
-              <TouchableOpacity onPress={handleAdd} disabled={saving} className="mt-2 h-12 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primary }}>
-                {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Save Item</Text>}
-              </TouchableOpacity>
-            </View>
+                <ScrollView className="px-6 pt-5" keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 12 }}>
+                  <TouchableOpacity onPress={() => setShowItemPicker((prev) => !prev)} style={inputStyle} className="flex-row items-center justify-between">
+                    <Text style={{ color: addName ? theme.text : theme.textMuted }}>{addName || 'Select item...'}</Text>
+                    <Ionicons name={showItemPicker ? 'chevron-up' : 'chevron-down'} size={20} color={theme.primary} />
+                  </TouchableOpacity>
+                  {showItemPicker && (
+                    <View className="mb-2 overflow-hidden rounded-xl border" style={{ borderColor: theme.border }}>
+                      {Object.keys(PREDEFINED_ITEMS).map((name) => (
+                        <TouchableOpacity key={name} className="border-b px-4 py-3" style={{ borderBottomColor: theme.border }} onPress={() => { setAddName(name); setAddCategory(PREDEFINED_ITEMS[name]); setShowItemPicker(false); }}>
+                          <Text style={{ color: theme.text }}>{name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                  <TextInput value={addCategory} onChangeText={setAddCategory} style={inputStyle} placeholder="Category" placeholderTextColor={theme.textMuted} />
+                  <TextInput value={addUnit} onChangeText={setAddUnit} style={inputStyle} placeholder="Unit (e.g. pcs, bag)" placeholderTextColor={theme.textMuted} />
+                  <TextInput value={addPrice} onChangeText={setAddPrice} style={inputStyle} placeholder="Price" keyboardType="numeric" placeholderTextColor={theme.textMuted} />
+                  <TextInput value={addCritical} onChangeText={setAddCritical} style={inputStyle} placeholder="Critical level" keyboardType="numeric" placeholderTextColor={theme.textMuted} />
+                  <TextInput value={addQty} onChangeText={setAddQty} style={inputStyle} placeholder="Current stock" keyboardType="numeric" placeholderTextColor={theme.textMuted} />
+                </ScrollView>
+                <View className="border-t px-6 pb-6 pt-4" style={{ borderColor: theme.border }}>
+                  <TouchableOpacity onPress={handleAdd} disabled={saving} className="h-12 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primary }}>
+                    {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Save Item</Text>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
           </KeyboardAvoidingView>
         </Modal>
 
@@ -677,10 +844,22 @@ export default function InventoryScreen({
           </View>
         </Modal>
 
-        <Modal visible={showTransaction} transparent animationType="slide" onRequestClose={() => setShowTransaction(false)}>
+        <Modal visible={showTransaction} transparent animationType="slide" onRequestClose={closeTransactionModal}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 justify-center px-6" style={{ backgroundColor: theme.overlay }}>
-            <View className="rounded-3xl p-6" style={{ backgroundColor: theme.elevated }}>
-              <Text className="mb-4 text-center text-[18px] font-bold" style={{ color: theme.primary }}>Record Transaction</Text>
+            <TouchableOpacity activeOpacity={1} onPress={closeTransactionModal} className="absolute inset-0" />
+            <TouchableWithoutFeedback>
+            <View className="max-h-[86%] rounded-3xl p-6" style={{ backgroundColor: theme.elevated }}>
+              <View className="mb-4 flex-row items-start justify-between">
+                <View className="flex-1 pr-3">
+                  <Text className="text-[18px] font-bold" style={{ color: theme.primary }}>Record Transaction</Text>
+                  <Text className="mt-2 rounded-xl border px-3 py-2 text-[12px] leading-5" style={{ color: theme.textMuted, backgroundColor: theme.input, borderColor: theme.border }}>
+                    Inventory logs are final once saved. Please review before confirming.
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={closeTransactionModal} className="h-9 w-9 items-center justify-center rounded-full" style={{ backgroundColor: theme.input }}>
+                  <Ionicons name="close" size={20} color={theme.text} />
+                </TouchableOpacity>
+              </View>
               <Text className="mb-3 text-center text-[13px]" style={{ color: theme.textSecondary }}>{txnItem?.item_name}</Text>
               <Text className="mb-1 text-[12px]" style={{ color: theme.textSecondary }}>Action Type</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-3">
@@ -713,13 +892,27 @@ export default function InventoryScreen({
                 {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Submit {ACTION_TYPE_LABELS[txnAction]}</Text>}
               </TouchableOpacity>
             </View>
+            </TouchableWithoutFeedback>
           </KeyboardAvoidingView>
         </Modal>
 
-        <Modal visible={showAddLog} transparent animationType="fade" onRequestClose={() => setShowAddLog(false)}>
-          <View className="flex-1 items-center justify-center px-6" style={{ backgroundColor: theme.overlay }}>
-            <View className="w-full rounded-3xl p-6" style={{ backgroundColor: theme.elevated }}>
-              <Text className="mb-4 text-center text-[18px] font-bold" style={{ color: theme.primary }}>Add Inventory Log</Text>
+        <Modal visible={showAddLog} transparent animationType="fade" onRequestClose={closeAddLogModal}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 items-center justify-center px-6" style={{ backgroundColor: theme.overlay }}>
+            <TouchableOpacity activeOpacity={1} onPress={closeAddLogModal} className="absolute inset-0" />
+            <TouchableWithoutFeedback>
+            <View className="max-h-[86%] w-full rounded-3xl p-6" style={{ backgroundColor: theme.elevated }}>
+              <View className="mb-4 flex-row items-start justify-between">
+                <View className="flex-1 pr-3">
+                  <Text className="text-[18px] font-bold" style={{ color: theme.primary }}>Add Inventory Log</Text>
+                  <Text className="mt-2 rounded-xl border px-3 py-2 text-[12px] leading-5" style={{ color: theme.textMuted, backgroundColor: theme.input, borderColor: theme.border }}>
+                    Inventory logs are final once saved. Please review before confirming.
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={closeAddLogModal} className="h-9 w-9 items-center justify-center rounded-full" style={{ backgroundColor: theme.input }}>
+                  <Ionicons name="close" size={20} color={theme.text} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 8 }}>
               <Text className="mb-1 text-[12px]" style={{ color: theme.textSecondary }}>Item</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-2">
                 {items.map((item) => (
@@ -760,11 +953,13 @@ export default function InventoryScreen({
               )}
               <TextInput value={logQty} onChangeText={setLogQty} style={inputStyle} keyboardType="numeric" placeholder="Quantity" placeholderTextColor={theme.textMuted} />
               <TextInput value={logNotes} onChangeText={setLogNotes} style={inputStyle} placeholder="Remarks / notes" placeholderTextColor={theme.textMuted} />
+              </ScrollView>
               <TouchableOpacity onPress={handleAddLog} disabled={saving} className="h-12 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primary }}>
                 {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Save Log</Text>}
               </TouchableOpacity>
             </View>
-          </View>
+            </TouchableWithoutFeedback>
+          </KeyboardAvoidingView>
         </Modal>
       {showBottomNav && onNavigate && (
         <BottomNavigationBar

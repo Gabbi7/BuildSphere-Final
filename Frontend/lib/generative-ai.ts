@@ -106,6 +106,7 @@ export const hybridGlassAudit = async (
     }
 
     console.log('DEBUG: Calling Local CV Service...');
+    console.log(`DEBUG: CV upload uses original selected photo URI: ${photoUri}`);
 
     const formData = new FormData();
     const filename = photoUri.split('/').pop() || 'photo.jpg';
@@ -150,7 +151,7 @@ export const hybridGlassAudit = async (
     const summary: string =
       cvData.summary ||
       cvData.summary_text ||
-      `Site Audit Complete. CV API detected ${count} valid panels.`;
+      `${count} complete glass panels were detected. Please verify the final count before saving.`;
     const annotatedImage: string | null = cvData.annotated_image_base64 || null;
 
     const avgConfidence =

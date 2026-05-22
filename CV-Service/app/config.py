@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     APP_NAME: str = "BuildSphere Glass Panel Detector"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
+    GLASS_COUNTER_DEBUG: bool = False
+    GLASS_COUNTER_DEBUG_DIR: str = "debug_outputs"
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
@@ -43,21 +45,21 @@ class Settings(BaseSettings):
     COCO_PROXY_CLASSES: list[str] = ["window", "glass"]
 
     # ── Inference Thresholds ──────────────────────────────────────────
-    # Confidence threshold — lower than typical (0.5) because glass edges
-    # are subtle, transparent, and produce softer activations.
-    # Set very low (0.05) to catch all thin panels in your specific photos.
-    # Current strict final-count threshold.
-    CONFIDENCE_THRESHOLD: float = 0.45
+    # Confidence threshold for Python post-processing. YOLO returns possible
+    # panels first; Python applies this threshold before counting.
+    CONFIDENCE_THRESHOLD: float = 0.25
 
-    # Lowered to 0.30 to prevent merging thin panels that are right next to each other.
-    # Current duplicate suppression threshold.
+    # YOLO's built-in NMS threshold for the raw possible boxes.
     NMS_IOU_THRESHOLD: float = 0.45
+    # Duplicate suppression threshold applied by Python after confidence/size filtering.
+    DUPLICATE_IOU_THRESHOLD: float = 0.60
     CONTAINMENT_THRESHOLD: float = 0.80
     MIN_BOX_WIDTH_RATIO: float = 0.035
     MIN_BOX_HEIGHT_RATIO: float = 0.060
     MIN_BOX_AREA_RATIO: float = 0.003
     MIN_BOX_ASPECT_RATIO: float = 0.18
     MAX_BOX_ASPECT_RATIO: float = 6.0
+    EDGE_MARGIN: int = 5
 
     # Maximum detections per image.
     # Construction facades can have 100+ panels; 300 gives headroom.

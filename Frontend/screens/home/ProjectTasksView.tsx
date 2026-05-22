@@ -4,12 +4,12 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { TaskCardSkeleton } from '../../components/skeletons';
 
 interface Task {
   id: number;
@@ -28,8 +28,6 @@ interface ProjectTasksViewProps {
   onTaskSelect: (task: Task) => void;
   onBack: () => void;
 }
-
-const PRIMARY = '#7370FF';
 
 export default function ProjectTasksView({ projectId, currentUserId, onTaskSelect, onBack }: ProjectTasksViewProps) {
   const { theme } = useAppTheme();
@@ -194,7 +192,11 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
 
       <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 40 }}>
         {loading ? (
-          <ActivityIndicator color={PRIMARY} className="mt-10" />
+          <View style={{ marginTop: 4 }}>
+            {Array.from({ length: 5 }).map((_, index) => (
+              <TaskCardSkeleton key={index} />
+            ))}
+          </View>
         ) : filteredTasks.length === 0 ? (
           <View className="mt-20 items-center">
             <Ionicons name="document-text-outline" size={48} color={theme.textMuted} />

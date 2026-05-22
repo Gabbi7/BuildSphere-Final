@@ -160,9 +160,10 @@ router.post('/:itemId/transaction', async (req, res) => {
             'Low Stock Alert ⚠️',
             `Item '${item.item_name}' in ${proj.project_name || 'Project'} is at ${refreshedItem.quantity} ${refreshedItem.unit || 'pcs'} (critical: ${refreshedItem.critical_level}).`,
             {
-              type: 'WARNING', // Phase 2 Type
+              type: 'CRITICAL_STOCK',
               screen: 'Inventory',
               project_id: String(item.project_id),
+              inventory_item_id: String(itemId),
               item_id: String(itemId),
             }
           );

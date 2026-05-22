@@ -3,7 +3,6 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   Animated,
   Modal,
   Alert,
@@ -23,7 +22,6 @@ import ProjectDetailScreen from './ProjectDetailScreen';
 import AddTaskScreen from './AddTaskScreen';
 import TaskDetailScreen from './TaskDetailScreen';
 import InventoryScreen from './InventoryScreen';
-import EditProjectScreen from './EditProjectScreen';
 import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
 import { API_URL } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
@@ -32,6 +30,7 @@ import { UserInfo } from '../../App';
 import { getPermissions } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { softCardShadow } from '../../constants/theme';
+import { ProjectCardSkeleton, SkeletonBox, SkeletonText } from '../../components/skeletons';
 
 interface HomeScreenProps {
   onLogout: () => void;
@@ -69,19 +68,20 @@ export default function HomeScreen({
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [showAddTask, setShowAddTask] = useState(false);
   const [showInventory, setShowInventory] = useState(false);
+  const [showInventoryProjectPicker, setShowInventoryProjectPicker] = useState(false);
   const [inventoryProjectId, setInventoryProjectId] = useState<number | null>(null);
+  const [highlightInventoryItemId, setHighlightInventoryItemId] = useState<number | null>(null);
   const fabAnim = useRef(new Animated.Value(0)).current;
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [projectActionModal, setProjectActionModal] = useState<Project | null>(null);
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [prefilledTask, setPrefilledTask] = useState<any>(null);
-  const [showEditProject, setShowEditProject] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [showChangeColor, setShowChangeColor] = useState(false);
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const fabBottom = Math.max(insets.bottom + 90, 110);
-  const fabMenuBottom = Math.max(insets.bottom + 140, 160);
+  const fabBottom = Math.max(insets.bottom + 80, 100);
+  const fabMenuBottom = Math.max(insets.bottom + 130, 150);
 
   // RBAC: Filtered FAB Actions 
   const perms = useMemo(() => getPermissions(user.role), [user.role]);
@@ -101,33 +101,6 @@ export default function HomeScreen({
     setProjectActionModal(project);
     setShowActionSheet(true);
   };
-
-  const deleteProject = async (projectId: number) => {
-    Alert.alert(
-      'Delete Project',
-      'Are you sure you want to delete this project? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const res = await fetch(`${API_URL}/projects/${projectId}`, { method: 'DELETE' });
-              if (res.ok) {
-                setProjects(prev => prev.filter(p => p.id !== projectId));
-                setShowActionSheet(false);
-                setProjectActionModal(null);
-              }
-            } catch (err) {
-              Alert.alert('Error', 'Failed to delete project.');
-            }
-          }
-        }
-      ]
-    );
-  };
-
 
   useEffect(() => {
     setUser(initialUser);
@@ -199,9 +172,37 @@ export default function HomeScreen({
   };
 
   // Deep-link: Notification → Inventory
-  const handleNotifNavigateToInventory = (projectId: number) => {
+  const handleNotifNavigateToInventory = (projectId?: number, inventoryItemId?: number) => {
+    setHighlightInventoryItemId(inventoryItemId ?? null);
+    if (!projectId) {
+      setShowInventoryProjectPicker(true);
+      return;
+    }
     setInventoryProjectId(projectId);
     setShowInventory(true);
+  };
+
+  const handleNotifNavigateToProject = (projectId: number) => {
+    setActiveTab('home');
+    setSelectedTask(null);
+    setShowInventory(false);
+    setShowSiteProgress(false);
+    setSelectedProjectId(projectId);
+  };
+
+  const handleNotifNavigateToSiteProgress = (projectId?: number, taskId?: number) => {
+    if (taskId) {
+      setActiveTab('mywork');
+      handleNotifNavigateToTask(taskId);
+      return;
+    }
+
+    if (projectId) {
+      handleNotifNavigateToProject(projectId);
+      return;
+    }
+
+    setActiveTab('mywork');
   };
 
   const handleMainTabPress = (tab: MainTab) => {
@@ -213,6 +214,7 @@ export default function HomeScreen({
     setSelectedProjectId(null);
     setSelectedTask(null);
     setShowInventory(false);
+    setHighlightInventoryItemId(null);
     setShowSiteProgress(false);
     setShowAddTask(false);
     setPrefilledTask(null);
@@ -277,6 +279,7 @@ export default function HomeScreen({
     const screen = String(notificationData.screen || '');
     const taskId = Number(notificationData.task_id);
     const projectId = Number(notificationData.project_id);
+    const inventoryItemId = Number(notificationData.inventory_item_id || notificationData.item_id);
 
     if (screen === 'TaskDetails' && Number.isFinite(taskId)) {
       setActiveTab('mywork');
@@ -286,6 +289,11 @@ export default function HomeScreen({
     } else if (screen === 'ProjectDetails' && Number.isFinite(projectId)) {
       setActiveTab('home');
       setSelectedProjectId(projectId);
+    } else if (screen === 'Inventory') {
+      handleNotifNavigateToInventory(
+        Number.isFinite(projectId) ? projectId : undefined,
+        Number.isFinite(inventoryItemId) ? inventoryItemId : undefined
+      );
     } else {
       setActiveTab('notifications');
     }
@@ -326,7 +334,7 @@ export default function HomeScreen({
                 className="px-5 pt-4"
                 refreshControl={
                   <RefreshControl
-                    refreshing={loadingProjects}
+                    refreshing={loadingProjects && projects.length > 0}
                     onRefresh={fetchProjects}
                     colors={[theme.primary]}
                     tintColor={theme.primary}
@@ -338,9 +346,13 @@ export default function HomeScreen({
                     <Text className="text-[10px] font-bold uppercase" style={{ color: theme.primary }}>{user.role}</Text>
                   </View>
                 </View>
-                <Text className="mb-4 text-[13px]" style={{ color: theme.textMuted }}>
-                  Welcome back, {user.firstName}! 👋
-                </Text>
+                {loadingProjects && projects.length === 0 ? (
+                  <SkeletonText width={180} height={13} style={{ marginBottom: 16 }} />
+                ) : (
+                  <Text className="mb-4 text-[13px]" style={{ color: theme.textMuted }}>
+                    Welcome back, {user.firstName}! 👋
+                  </Text>
+                )}
 
                 {/* Dashboard Summary Card — Hidden for Accounting audit view */}
                 {user.role.toLowerCase() !== 'accounting' && (
@@ -348,15 +360,27 @@ export default function HomeScreen({
                     className="mb-6 flex-row items-center justify-between rounded-[20px] border p-5"
                     style={{ backgroundColor: theme.surface, borderColor: theme.border, ...softCardShadow }}>
                     <View>
-                      <Text className="text-base font-semibold" style={{ color: theme.text }}>Ongoing Projects</Text>
+                      {loadingProjects && projects.length === 0 ? (
+                        <SkeletonText width={132} height={16} />
+                      ) : (
+                        <Text className="text-base font-semibold" style={{ color: theme.text }}>Ongoing Projects</Text>
+                      )}
                     </View>
-                    <Text className="text-3xl font-bold" style={{ color: theme.warning }}>{projects.length}</Text>
+                    {loadingProjects && projects.length === 0 ? (
+                      <SkeletonBox width={42} height={34} borderRadius={10} />
+                    ) : (
+                      <Text className="text-3xl font-bold" style={{ color: theme.warning }}>{projects.length}</Text>
+                    )}
                   </View>
                 )}
 
                 <Text className="mb-4 text-lg font-bold" style={{ color: theme.text }}>Projects</Text>
                 {loadingProjects ? (
-                  <ActivityIndicator color={theme.primary} />
+                  <View>
+                    {Array.from({ length: 3 }).map((_, index) => (
+                      <ProjectCardSkeleton key={index} />
+                    ))}
+                  </View>
                 ) : projectsError ? (
                   <View className="mt-6 items-center rounded-2xl border p-5" style={{ backgroundColor: theme.elevated, borderColor: theme.danger }}>
                     <Ionicons name="alert-circle-outline" size={28} color={theme.danger} />
@@ -392,12 +416,21 @@ export default function HomeScreen({
             )}
           </View>
         ) : activeTab === 'mywork' ? (
-          <MyWork userId={user.id} onTaskSelect={(task) => setSelectedTask(task)} />
+          <MyWork
+            userId={user.id}
+            onTaskSelect={(task) => setSelectedTask(task)}
+            projects={projects}
+            projectsLoading={loadingProjects}
+            projectsError={projectsError}
+            onRetryProjects={fetchProjects}
+          />
         ) : activeTab === 'notifications' ? (
           <Notifications
             userId={user.id}
             onNavigateToTask={handleNotifNavigateToTask}
             onNavigateToInventory={handleNotifNavigateToInventory}
+            onNavigateToProject={handleNotifNavigateToProject}
+            onNavigateToSiteProgress={handleNotifNavigateToSiteProgress}
             onNavigateToTab={setActiveTab}
           />
         ) : (
@@ -441,15 +474,7 @@ export default function HomeScreen({
                     if (action.key === 'site') setShowSiteProgress(true);
                     if (action.key === 'task') setShowAddTask(true);
                     if (action.key === 'inventory') {
-                      if (projects.length > 0) {
-                        setInventoryProjectId(projects[0].id);
-                        setShowInventory(true);
-                      } else {
-                        Alert.alert(
-                          'No Projects',
-                          'You need at least one project to update inventory.'
-                        );
-                      }
+                      setShowInventoryProjectPicker(true);
                     }
                   }}
                   className="flex-row items-center rounded-[14px] px-4 py-3"
@@ -528,6 +553,96 @@ export default function HomeScreen({
         projects={projects}
         onTaskAdded={() => { }}
       />
+
+      {/* Project Picker for Global Inventory Action */}
+      <Modal
+        visible={showInventoryProjectPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowInventoryProjectPicker(false)}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => setShowInventoryProjectPicker(false)}
+          className="flex-1 justify-end"
+          style={{ backgroundColor: theme.overlay }}>
+          <TouchableWithoutFeedback>
+            <View className="max-h-[72%] rounded-t-[30px] p-6 pb-10" style={{ backgroundColor: theme.elevated }}>
+              <View className="mb-5 flex-row items-center justify-between">
+                <View>
+                  <Text className="text-[20px] font-bold" style={{ color: theme.text }}>Select Project</Text>
+                  <Text className="mt-1 text-[12px]" style={{ color: theme.textMuted }}>
+                    Choose which project inventory to update.
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setShowInventoryProjectPicker(false)}
+                  className="h-9 w-9 items-center justify-center rounded-full"
+                  style={{ backgroundColor: theme.input }}>
+                  <Ionicons name="close" size={20} color={theme.text} />
+                </TouchableOpacity>
+              </View>
+
+              {loadingProjects ? (
+                <View className="py-10">
+                  <Text className="text-center text-[13px]" style={{ color: theme.textMuted }}>Loading projects...</Text>
+                </View>
+              ) : projectsError ? (
+                <View className="items-center rounded-2xl border p-5" style={{ backgroundColor: theme.surface, borderColor: theme.danger }}>
+                  <Ionicons name="alert-circle-outline" size={28} color={theme.danger} />
+                  <Text className="mt-2 text-center text-[13px]" style={{ color: theme.textSecondary }}>{projectsError}</Text>
+                  <TouchableOpacity
+                    onPress={fetchProjects}
+                    className="mt-3 rounded-xl px-4 py-2"
+                    style={{ backgroundColor: theme.primary }}>
+                    <Text className="text-[12px] font-semibold text-white">Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : projects.length === 0 ? (
+                <View className="items-center rounded-2xl border border-dashed p-8" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+                  <Ionicons name="layers-outline" size={34} color={theme.textMuted} />
+                  <Text className="mt-3 text-center text-[14px]" style={{ color: theme.textMuted }}>No projects available.</Text>
+                </View>
+              ) : (
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  {projects.map((project) => (
+                    <TouchableOpacity
+                      key={project.id}
+                      onPress={() => {
+                        setInventoryProjectId(project.id);
+                        setHighlightInventoryItemId(null);
+                        setShowInventoryProjectPicker(false);
+                        setShowInventory(true);
+                      }}
+                      className="mb-3 flex-row items-center rounded-2xl border p-4"
+                      style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+                      <View
+                        className="mr-3 h-11 w-11 rounded-2xl"
+                        style={{ backgroundColor: project.color || '#FFDFF2' }}
+                      />
+                      <View className="flex-1">
+                        <Text className="text-[15px] font-bold" style={{ color: theme.text }} numberOfLines={1}>
+                          {project.name}
+                        </Text>
+                        {!!project.location && (
+                          <Text className="mt-1 text-[12px]" style={{ color: theme.textMuted }} numberOfLines={1}>
+                            {project.location}
+                          </Text>
+                        )}
+                      </View>
+                      <View className="ml-3 rounded-full px-2.5 py-1" style={{ backgroundColor: theme.input }}>
+                        <Text className="text-[10px] font-bold uppercase" style={{ color: theme.textSecondary }}>
+                          {project.status || 'active'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          </TouchableWithoutFeedback>
+        </TouchableOpacity>
+      </Modal>
+
       <TaskDetailScreen
         visible={!!selectedTask}
         task={selectedTask}
@@ -551,6 +666,7 @@ export default function HomeScreen({
 
           setSelectedTask(null);
           setInventoryProjectId(projectId);
+          setHighlightInventoryItemId(null);
           setShowInventory(true);
         }}
       />
@@ -558,10 +674,14 @@ export default function HomeScreen({
         <Modal visible={showInventory} animationType="slide" transparent={false}>
           <InventoryScreen
             projectId={inventoryProjectId}
-            onBack={() => setShowInventory(false)}
+            onBack={() => {
+              setShowInventory(false);
+              setHighlightInventoryItemId(null);
+            }}
             userRole={user.role}
             userId={user.id}
-            activeMainTab={activeTab === 'notifications' ? 'notifications' : 'mywork'}
+            highlightItemId={highlightInventoryItemId}
+            activeMainTab={activeTab === 'notifications' ? 'notifications' : activeTab === 'home' ? 'home' : 'mywork'}
             canViewHome={perms.canViewDashboard}
             unreadCount={unreadCount}
             onNavigate={handleMainTabPress}
@@ -590,17 +710,6 @@ export default function HomeScreen({
             <TouchableOpacity
               onPress={() => {
                 setShowActionSheet(false);
-                setShowEditProject(true);
-              }}
-              className="flex-row items-center py-4 border-b"
-              style={{ borderColor: theme.border }}>
-              <Ionicons name="create-outline" size={22} color={theme.primary} />
-              <Text className="ml-4 text-[16px]" style={{ color: theme.text }}>Edit Project</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => {
-                setShowActionSheet(false);
                 setShowChangeColor(true);
               }}
               className="flex-row items-center py-4">
@@ -611,14 +720,6 @@ export default function HomeScreen({
           </TouchableWithoutFeedback>
         </TouchableOpacity>
       </Modal>
-
-      {/* Edit Project Screen */}
-      <EditProjectScreen
-        visible={showEditProject}
-        project={projectActionModal}
-        onClose={() => setShowEditProject(false)}
-        onProjectUpdated={() => fetchProjects()}
-      />
 
       <ChangeProjectColorModal
         visible={showChangeColor}

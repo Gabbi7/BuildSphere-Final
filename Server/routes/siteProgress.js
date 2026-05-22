@@ -5,7 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const pool = require('../db');
 const { createClient } = require('@supabase/supabase-js');
-const { sendPushNotificationToUser } = require('../services/pushNotificationService');
+const { ensureNotificationTables, sendPushNotificationToUser } = require('../services/pushNotificationService');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -94,19 +94,41 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
 
     // Notification handling (Simplified for now)
     try {
+      await ensureNotificationTables();
       await pool.query(
-        'INSERT INTO notifications (type, title, message, user_id) VALUES ($1, $2, $3, $4)',
+        'INSERT INTO notifications (type, title, message, user_id, data, reference_url, is_read, created_at) VALUES ($1, $2, $3, $4, $5, $6, false, NOW())',
         [
-          'success',
+          'site_progress_uploaded',
           notifTitle,
           notifMessage,
           userId,
+          {
+            type: 'site_progress_uploaded',
+            screen: 'SiteProgressDetails',
+            project_id: String(projectId),
+            site_progress_id: String(progress.id),
+            task_id: String(taskId),
+          },
+          `/site-progress/${progress.id}`,
         ]
       );
     } catch (insertErr) {
       await pool.query(
-        'INSERT INTO notifications (type, title, body, user_id, data, is_read, created_at) VALUES ($1, $2, $3, $4, $5, false, NOW())',
-        ['success', notifTitle, notifMessage, userId, { type: 'site_progress_uploaded' }]
+        'INSERT INTO notifications (type, title, body, user_id, data, reference_url, is_read, created_at) VALUES ($1, $2, $3, $4, $5, $6, false, NOW())',
+        [
+          'site_progress_uploaded',
+          notifTitle,
+          notifMessage,
+          userId,
+          {
+            type: 'site_progress_uploaded',
+            screen: 'SiteProgressDetails',
+            project_id: String(projectId),
+            site_progress_id: String(progress.id),
+            task_id: String(taskId),
+          },
+          `/site-progress/${progress.id}`,
+        ]
       );
     }
 
