@@ -10,11 +10,11 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { Picker } from '@react-native-picker/picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -31,22 +31,18 @@ interface UserOption {
   role?: string;
 }
 
-interface MilestoneOption {
-  id: number;
-  milestone_name: string;
-}
-
-interface PhaseOption {
-  id: number;
-  phase_key?: string;
-  phase_title?: string;
-  milestones?: MilestoneOption[];
-}
-
 interface PickedAttachment {
   uri: string;
   name: string;
   type: string;
+}
+
+type SelectorKind = 'project' | 'assignedTo' | 'priority';
+
+interface SelectorOption {
+  value: string;
+  label: string;
+  detail?: string;
 }
 
 interface AddTaskScreenProps {
@@ -71,6 +67,12 @@ const parseDate = (value: string) => {
   return Number.isNaN(date.getTime()) ? new Date() : date;
 };
 
+const displayDate = (value: string) => {
+  if (!value) return 'mm/dd/yyyy';
+  const [year, month, day] = value.split('-');
+  return month && day && year ? `${month}/${day}/${year}` : value;
+};
+
 export default function AddTaskScreen({
   visible,
   onClose,
@@ -81,18 +83,14 @@ export default function AddTaskScreen({
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
   const [loadingMeta, setLoadingMeta] = useState(false);
-  const [loadingPhases, setLoadingPhases] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [dbProjects, setDbProjects] = useState<ProjectOption[]>(projects);
   const [users, setUsers] = useState<UserOption[]>([]);
-  const [phases, setPhases] = useState<PhaseOption[]>([]);
-  const [milestones, setMilestones] = useState<MilestoneOption[]>([]);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
+  const [selector, setSelector] = useState<SelectorKind | null>(null);
 
   const [projectId, setProjectId] = useState('');
-  const [phaseId, setPhaseId] = useState('');
-  const [milestoneId, setMilestoneId] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [assignedTo, setAssignedTo] = useState('');
@@ -103,15 +101,68 @@ export default function AddTaskScreen({
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const projectOptions = dbProjects.length > 0 ? dbProjects : projects;
-  const selectedPhase = useMemo(
-    () => phases.find((phase) => String(phase.id) === String(phaseId)),
-    [phaseId, phases]
+
+  const selectedProjectLabel = useMemo(
+    () => projectOptions.find((project) => String(project.id) === projectId)?.name || '',
+    [projectId, projectOptions]
   );
+
+  const selectedAssigneeLabel = useMemo(() => {
+    const user = users.find((item) => String(item.id) === assignedTo);
+    if (!user) return '';
+    return `${user.name}${user.role ? ` - ${user.role}` : ''}`;
+  }, [assignedTo, users]);
+
+  const selectedPriorityLabel = PRIORITIES.find((item) => item.value === priority)?.label || '';
+
+  const selectorConfig = useMemo(() => {
+    if (!selector) return null;
+
+    if (selector === 'project') {
+      return {
+        title: 'Select Project',
+        selectedValue: projectId,
+        emptyText: 'No projects available.',
+        options: projectOptions.map((project) => ({
+          value: String(project.id),
+          label: project.name,
+        })),
+      };
+    }
+
+    if (selector === 'assignedTo') {
+      return {
+        title: 'Assign To',
+        selectedValue: assignedTo,
+        emptyText: 'No users available.',
+        options: users.map((user) => ({
+          value: String(user.id),
+          label: user.name,
+          detail: user.role || user.email,
+        })),
+      };
+    }
+
+    return {
+      title: 'Priority Level',
+      selectedValue: priority,
+      emptyText: 'No priority options available.',
+      options: PRIORITIES.map((item) => ({
+        value: item.value,
+        label: item.label,
+      })),
+    };
+  }, [
+    assignedTo,
+    priority,
+    projectId,
+    projectOptions,
+    selector,
+    users,
+  ]);
 
   const isDirty = Boolean(
     projectId ||
-      phaseId ||
-      milestoneId ||
       title.trim() ||
       description.trim() ||
       assignedTo ||
@@ -120,16 +171,22 @@ export default function AddTaskScreen({
       attachment
   );
 
+  const isDark = theme.mode === 'dark';
+  const modalBg = isDark ? '#111118' : theme.background;
+  const cardBg = isDark ? '#15151E' : theme.elevated;
+  const fieldBg = isDark ? '#171720' : theme.input;
+  const fieldBorder = isDark ? '#242432' : theme.border;
+  const labelColor = isDark ? '#F4F4FA' : theme.text;
+  const mutedColor = isDark ? '#8F8FA3' : theme.textMuted;
+
   const inputStyle = {
-    backgroundColor: theme.input,
-    borderColor: theme.border,
+    backgroundColor: fieldBg,
+    borderColor: fieldBorder,
     color: theme.text,
   };
 
   const resetForm = () => {
     setProjectId('');
-    setPhaseId('');
-    setMilestoneId('');
     setTitle('');
     setDescription('');
     setAssignedTo('');
@@ -138,10 +195,9 @@ export default function AddTaskScreen({
     setDueDate('');
     setAttachment(null);
     setErrors({});
-    setPhases([]);
-    setMilestones([]);
     setShowStartPicker(false);
     setShowEndPicker(false);
+    setSelector(null);
   };
 
   useEffect(() => {
@@ -161,44 +217,9 @@ export default function AddTaskScreen({
       .finally(() => setLoadingMeta(false));
   }, [projects, visible]);
 
-  useEffect(() => {
-    if (!projectId) {
-      setPhases([]);
-      setMilestones([]);
-      setPhaseId('');
-      setMilestoneId('');
-      return;
-    }
-
-    setLoadingPhases(true);
-    fetch(`${API_URL}/projects/${projectId}/milestone-plan`)
-      .then((res) => res.json())
-      .then((data) => {
-        const nextPhases = Array.isArray(data.phases) ? data.phases : [];
-        setPhases(nextPhases);
-        setPhaseId('');
-        setMilestoneId('');
-        setMilestones([]);
-      })
-      .catch((err) => {
-        console.error('Failed to fetch project phases:', err);
-        setPhases([]);
-        setMilestones([]);
-      })
-      .finally(() => setLoadingPhases(false));
-  }, [projectId]);
-
-  useEffect(() => {
-    const nextMilestones = selectedPhase?.milestones || [];
-    setMilestones(nextMilestones);
-    setMilestoneId('');
-  }, [selectedPhase]);
-
   const validate = () => {
     const nextErrors: Record<string, string> = {};
     if (!projectId) nextErrors.project_id = 'Project is required.';
-    if (!phaseId) nextErrors.phase_id = 'Phase is required.';
-    if (!milestoneId) nextErrors.milestone_id = 'Milestone is required.';
     if (!title.trim()) nextErrors.title = 'Task title is required.';
     if (!assignedTo) nextErrors.assigned_to = 'Assigned user is required.';
     if (!priority) nextErrors.priority = 'Priority is required.';
@@ -211,6 +232,28 @@ export default function AddTaskScreen({
     return Object.keys(nextErrors).length === 0;
   };
 
+  const openSelector = (kind: SelectorKind) => {
+    Keyboard.dismiss();
+    setSelector(kind);
+  };
+
+  const handleSelectOption = (value: string) => {
+    if (!selector) return;
+
+    if (selector === 'project') {
+      setProjectId(value);
+      setErrors((prev) => ({ ...prev, project_id: '' }));
+    } else if (selector === 'assignedTo') {
+      setAssignedTo(value);
+      setErrors((prev) => ({ ...prev, assigned_to: '' }));
+    } else {
+      setPriority(value);
+      setErrors((prev) => ({ ...prev, priority: '' }));
+    }
+
+    setSelector(null);
+  };
+
   const requestClose = () => {
     if (!isDirty) {
       resetForm();
@@ -218,8 +261,8 @@ export default function AddTaskScreen({
       return;
     }
 
-    Alert.alert('Discard task draft?', 'Your unsaved task details will be lost.', [
-      { text: 'Keep editing', style: 'cancel' },
+    Alert.alert('Discard task draft?', 'Your entered task details will not be saved.', [
+      { text: 'Keep Editing', style: 'cancel' },
       {
         text: 'Discard',
         style: 'destructive',
@@ -279,8 +322,6 @@ export default function AddTaskScreen({
       const formData = new FormData();
       formData.append('title', title.trim());
       formData.append('project_id', projectId);
-      formData.append('phase_id', phaseId);
-      formData.append('milestone_id', milestoneId);
       formData.append('description', description.trim());
       formData.append('assigned_to', assignedTo);
       formData.append('priority', priority);
@@ -326,26 +367,174 @@ export default function AddTaskScreen({
     errors[name] ? <Text className="mt-1 text-[11px]" style={{ color: theme.danger }}>{errors[name]}</Text> : null;
 
   const Label = ({ children }: { children: React.ReactNode }) => (
-    <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.text }}>
+    <Text className="mb-2 text-[12px] font-bold" style={{ color: labelColor }}>
       {children}
     </Text>
   );
+
+  const FieldWrap = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
+    <View className={`mb-4 ${className}`}>{children}</View>
+  );
+
+  const SelectField = ({
+    value,
+    placeholder,
+    onPress,
+    disabled = false,
+  }: {
+    value: string;
+    placeholder: string;
+    onPress: () => void;
+    disabled?: boolean;
+  }) => (
+    <TouchableOpacity
+      activeOpacity={0.82}
+      disabled={disabled}
+      onPress={onPress}
+      className="h-[48px] flex-row items-center justify-between rounded-xl border px-4"
+      style={[inputStyle, disabled ? { opacity: 0.55 } : null]}
+    >
+      <Text
+        className="mr-3 flex-1 text-[14px]"
+        numberOfLines={1}
+        style={{ color: value ? theme.text : mutedColor }}
+      >
+        {value || placeholder}
+      </Text>
+      <Ionicons name="chevron-down" size={17} color={mutedColor} />
+    </TouchableOpacity>
+  );
+
+  const Section = ({
+    title,
+    icon,
+    children,
+  }: {
+    title: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    children: React.ReactNode;
+  }) => (
+    <View className="mb-3 rounded-2xl border p-3" style={{ backgroundColor: cardBg, borderColor: fieldBorder }}>
+      <View className="mb-3 flex-row items-center">
+        <View className="mr-2 h-7 w-7 items-center justify-center rounded-lg" style={{ backgroundColor: theme.primaryLight }}>
+          <Ionicons name={icon} size={16} color={theme.primary} />
+        </View>
+        <Text className="text-[14px] font-bold" style={{ color: labelColor }}>{title}</Text>
+      </View>
+      {children}
+    </View>
+  );
+
+  const SelectorSheet = () => {
+    if (!selectorConfig) return null;
+    const options: SelectorOption[] = selectorConfig.options;
+
+    return (
+      <View
+        className="justify-end"
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          zIndex: 20,
+          backgroundColor: 'rgba(0, 0, 0, 0.46)',
+        }}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => setSelector(null)}
+          style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+        />
+        <View
+          className="rounded-t-[28px] border-t px-5 pt-4"
+          style={{
+            backgroundColor: cardBg,
+            borderColor: fieldBorder,
+            maxHeight: '72%',
+            paddingBottom: Math.max(insets.bottom + 12, 24),
+          }}
+        >
+          <View className="mb-3 flex-row items-center justify-between">
+            <Text className="text-[18px] font-bold" style={{ color: labelColor }}>
+              {selectorConfig.title}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setSelector(null)}
+              className="h-9 w-9 items-center justify-center rounded-full"
+              style={{ backgroundColor: fieldBg }}
+            >
+              <Ionicons name="close" size={18} color={mutedColor} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {options.length === 0 ? (
+              <View className="items-center py-10">
+                <Text className="text-center text-[13px]" style={{ color: mutedColor }}>
+                  {selectorConfig.emptyText}
+                </Text>
+              </View>
+            ) : (
+              options.map((option) => {
+                const selected = option.value === selectorConfig.selectedValue;
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    activeOpacity={0.78}
+                    onPress={() => handleSelectOption(option.value)}
+                    className="mb-2 min-h-[52px] flex-row items-center rounded-xl px-3"
+                    style={{ backgroundColor: selected ? theme.primaryLight : fieldBg }}
+                  >
+                    <View className="flex-1">
+                      <Text
+                        className="text-[14px] font-semibold"
+                        numberOfLines={1}
+                        style={{ color: selected ? theme.primary : theme.text }}
+                      >
+                        {option.label}
+                      </Text>
+                      {option.detail ? (
+                        <Text className="mt-0.5 text-[11px]" numberOfLines={1} style={{ color: mutedColor }}>
+                          {option.detail}
+                        </Text>
+                      ) : null}
+                    </View>
+                    {selected ? <Ionicons name="checkmark-circle" size={20} color={theme.primary} /> : null}
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </ScrollView>
+        </View>
+      </View>
+    );
+  };
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={requestClose}>
       <KeyboardAvoidingView
         className="flex-1"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ backgroundColor: theme.background }}>
+        style={{ backgroundColor: modalBg }}
+      >
         <View
-          className="flex-row items-center border-b px-5 pb-4"
-          style={{ paddingTop: Math.max(insets.top + 10, 42), borderColor: theme.border, backgroundColor: theme.elevated }}>
-          <TouchableOpacity onPress={requestClose} className="mr-3 h-10 w-10 items-center justify-center rounded-full" style={{ backgroundColor: theme.input }}>
-            <Ionicons name="close" size={21} color={theme.text} />
-          </TouchableOpacity>
-          <View className="flex-1">
-            <Text className="text-[20px] font-bold" style={{ color: theme.primary }}>Add New Task</Text>
-            <Text className="mt-0.5 text-[12px]" style={{ color: theme.textMuted }}>Create and assign project work</Text>
+          className="border-b px-5 pb-4"
+          style={{ paddingTop: Math.max(insets.top + 12, 48), borderColor: fieldBorder, backgroundColor: cardBg }}
+        >
+          <View className="flex-row items-center justify-between">
+            <TouchableOpacity
+              onPress={requestClose}
+              className="mr-3 h-10 w-10 items-center justify-center rounded-full"
+              style={{ backgroundColor: fieldBg }}
+            >
+              <Ionicons name="close" size={21} color={mutedColor} />
+            </TouchableOpacity>
+            <View className="flex-1">
+              <Text className="text-[22px] font-bold" style={{ color: theme.primary }}>Add New Task</Text>
+              <Text className="mt-1 text-[12px]" style={{ color: mutedColor }}>Create and assign a new project task</Text>
+            </View>
           </View>
         </View>
 
@@ -353,186 +542,174 @@ export default function AddTaskScreen({
           className="flex-1 px-5"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingTop: 18, paddingBottom: Math.max(insets.bottom + 28, 48) }}>
-          <View className="rounded-2xl border p-4" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+          onScrollBeginDrag={Keyboard.dismiss}
+          contentContainerStyle={{ paddingTop: 16, paddingBottom: Math.max(insets.bottom + 104, 132) }}
+        >
+          <View>
             {loadingMeta ? (
-              <View className="items-center py-10">
+              <View className="items-center rounded-2xl border py-12" style={{ backgroundColor: cardBg, borderColor: fieldBorder }}>
                 <ActivityIndicator color={theme.primary} />
-                <Text className="mt-3 text-[13px]" style={{ color: theme.textMuted }}>Loading task options...</Text>
+                <Text className="mt-3 text-[13px]" style={{ color: mutedColor }}>Loading task options...</Text>
               </View>
             ) : (
               <>
-                <Label>Project *</Label>
-                <View className="mb-4 overflow-hidden rounded-xl border" style={inputStyle}>
-                  <Picker selectedValue={projectId} onValueChange={(value) => setProjectId(String(value))} style={{ color: theme.text }}>
-                    <Picker.Item label="Select project" value="" />
-                    {projectOptions.map((project) => (
-                      <Picker.Item key={project.id} label={project.name} value={String(project.id)} />
-                    ))}
-                  </Picker>
-                </View>
-                <FieldError name="project_id" />
+                <Section title="Project Details" icon="folder-open-outline">
+                  <FieldWrap className="mb-0">
+                    <Label>Project *</Label>
+                    <SelectField
+                      value={selectedProjectLabel}
+                      placeholder="Select project"
+                      onPress={() => openSelector('project')}
+                    />
+                    <FieldError name="project_id" />
+                  </FieldWrap>
+                </Section>
 
-                <Label>Phase *</Label>
-                <View className="mb-4 overflow-hidden rounded-xl border" style={inputStyle}>
-                  <Picker
-                    enabled={!!projectId && !loadingPhases}
-                    selectedValue={phaseId}
-                    onValueChange={(value) => setPhaseId(String(value))}
-                    style={{ color: theme.text }}>
-                    <Picker.Item label={loadingPhases ? 'Loading phases...' : 'Select phase'} value="" />
-                    {phases.map((phase) => (
-                      <Picker.Item key={phase.id} label={phase.phase_title || phase.phase_key || `Phase ${phase.id}`} value={String(phase.id)} />
-                    ))}
-                  </Picker>
-                </View>
-                <FieldError name="phase_id" />
+                <Section title="Task Information" icon="document-text-outline">
+                  <FieldWrap>
+                    <Label>Task Title *</Label>
+                    <TextInput
+                      value={title}
+                      onChangeText={(value) => {
+                        setTitle(value);
+                        setErrors((prev) => ({ ...prev, title: '' }));
+                      }}
+                      placeholder="Enter the title of the task here"
+                      placeholderTextColor={mutedColor}
+                      className="h-[48px] rounded-xl border px-4 text-[14px]"
+                      style={inputStyle}
+                      returnKeyType="next"
+                    />
+                    <FieldError name="title" />
+                  </FieldWrap>
 
-                <Label>Milestone *</Label>
-                <View className="mb-4 overflow-hidden rounded-xl border" style={inputStyle}>
-                  <Picker
-                    enabled={!!phaseId}
-                    selectedValue={milestoneId}
-                    onValueChange={(value) => setMilestoneId(String(value))}
-                    style={{ color: theme.text }}>
-                    <Picker.Item label="Select milestone" value="" />
-                    {milestones.map((milestone) => (
-                      <Picker.Item key={milestone.id} label={milestone.milestone_name} value={String(milestone.id)} />
-                    ))}
-                  </Picker>
-                </View>
-                <FieldError name="milestone_id" />
+                  <FieldWrap className="mb-0">
+                    <Label>Task Description (optional)</Label>
+                    <TextInput
+                      value={description}
+                      onChangeText={setDescription}
+                      placeholder="Enter the description of the task here"
+                      placeholderTextColor={mutedColor}
+                      multiline
+                      textAlignVertical="top"
+                      className="min-h-[96px] rounded-xl border px-4 py-3 text-[14px]"
+                      style={inputStyle}
+                    />
+                  </FieldWrap>
+                </Section>
 
-                <Label>Task Title *</Label>
-                <TextInput
-                  value={title}
-                  onChangeText={(value) => {
-                    setTitle(value);
-                    setErrors((prev) => ({ ...prev, title: '' }));
-                  }}
-                  placeholder="Enter the title of the task"
-                  placeholderTextColor={theme.textMuted}
-                  className="mb-4 h-12 rounded-xl border px-4 text-[14px]"
-                  style={inputStyle}
-                />
-                <FieldError name="title" />
+                <Section title="Assignment" icon="people-outline">
+                  <FieldWrap>
+                    <Label>Assigned To *</Label>
+                    <SelectField
+                      value={selectedAssigneeLabel}
+                      placeholder="Select assignee"
+                      onPress={() => openSelector('assignedTo')}
+                    />
+                    <FieldError name="assigned_to" />
+                  </FieldWrap>
 
-                <Label>Task Description</Label>
-                <TextInput
-                  value={description}
-                  onChangeText={setDescription}
-                  placeholder="Add task details, notes, or instructions"
-                  placeholderTextColor={theme.textMuted}
-                  multiline
-                  textAlignVertical="top"
-                  className="mb-4 min-h-[92px] rounded-xl border px-4 py-3 text-[14px]"
-                  style={inputStyle}
-                />
+                  <FieldWrap className="mb-0">
+                    <Label>Priority Level *</Label>
+                    <SelectField
+                      value={selectedPriorityLabel}
+                      placeholder="Select priority"
+                      onPress={() => openSelector('priority')}
+                    />
+                    <FieldError name="priority" />
+                  </FieldWrap>
+                </Section>
 
-                <Label>Assigned To *</Label>
-                <View className="mb-4 overflow-hidden rounded-xl border" style={inputStyle}>
-                  <Picker selectedValue={assignedTo} onValueChange={(value) => setAssignedTo(String(value))} style={{ color: theme.text }}>
-                    <Picker.Item label="Select user" value="" />
-                    {users.map((user) => (
-                      <Picker.Item key={user.id} label={user.name} value={String(user.id)} />
-                    ))}
-                  </Picker>
-                </View>
-                <FieldError name="assigned_to" />
-
-                <Label>Priority Level *</Label>
-                <View className="mb-4 overflow-hidden rounded-xl border" style={inputStyle}>
-                  <Picker selectedValue={priority} onValueChange={(value) => setPriority(String(value))} style={{ color: theme.text }}>
-                    {PRIORITIES.map((item) => (
-                      <Picker.Item key={item.value} label={item.label} value={item.value} />
-                    ))}
-                  </Picker>
-                </View>
-                <FieldError name="priority" />
-
-                <View className="mb-4 flex-row gap-3">
-                  <View className="flex-1">
+                <Section title="Schedule" icon="calendar-outline">
+                  <View className="flex-row gap-3">
+                    <FieldWrap className="flex-1 mb-0">
                     <Label>Task Start *</Label>
                     <TouchableOpacity
                       onPress={() => setShowStartPicker(true)}
-                      className="h-12 flex-row items-center justify-between rounded-xl border px-3"
+                      className="h-[48px] flex-row items-center justify-between rounded-xl border px-3"
                       style={inputStyle}>
-                      <Text className="text-[13px]" style={{ color: startDate ? theme.text : theme.textMuted }}>
-                        {startDate || 'Select date'}
+                      <Text className="text-[13px]" style={{ color: startDate ? theme.text : mutedColor }}>
+                        {displayDate(startDate)}
                       </Text>
-                      <Ionicons name="calendar-outline" size={17} color={theme.textMuted} />
+                      <Ionicons name="calendar-outline" size={16} color={mutedColor} />
                     </TouchableOpacity>
                     <FieldError name="start_date" />
-                  </View>
-                  <View className="flex-1">
+                    </FieldWrap>
+                    <FieldWrap className="flex-1 mb-0">
                     <Label>Task Until *</Label>
                     <TouchableOpacity
                       onPress={() => setShowEndPicker(true)}
-                      className="h-12 flex-row items-center justify-between rounded-xl border px-3"
+                      className="h-[48px] flex-row items-center justify-between rounded-xl border px-3"
                       style={inputStyle}>
-                      <Text className="text-[13px]" style={{ color: dueDate ? theme.text : theme.textMuted }}>
-                        {dueDate || 'Select date'}
+                      <Text className="text-[13px]" style={{ color: dueDate ? theme.text : mutedColor }}>
+                        {displayDate(dueDate)}
                       </Text>
-                      <Ionicons name="calendar-outline" size={17} color={theme.textMuted} />
+                      <Ionicons name="calendar-outline" size={16} color={mutedColor} />
                     </TouchableOpacity>
                     <FieldError name="due_date" />
+                    </FieldWrap>
                   </View>
-                </View>
 
-                {showStartPicker && (
-                  <DateTimePicker
-                    value={parseDate(startDate)}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'inline' : 'default'}
-                    onChange={(event, date) => onDateChange(event, date, 'start')}
-                  />
-                )}
-                {showEndPicker && (
-                  <DateTimePicker
-                    value={parseDate(dueDate || startDate)}
-                    minimumDate={startDate ? parseDate(startDate) : undefined}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'inline' : 'default'}
-                    onChange={(event, date) => onDateChange(event, date, 'end')}
-                  />
-                )}
-
-                <Label>Attachments</Label>
-                <TouchableOpacity
-                  onPress={pickAttachment}
-                  className="mb-3 flex-row items-center justify-between rounded-xl border border-dashed px-4 py-3"
-                  style={{ backgroundColor: theme.input, borderColor: theme.primary }}>
-                  <View className="mr-3 flex-1">
-                    <Text className="text-[13px] font-semibold" style={{ color: theme.primary }}>
-                      {attachment ? attachment.name : 'Attach image'}
-                    </Text>
-                    <Text className="mt-1 text-[11px]" style={{ color: theme.textMuted }}>
-                      Mobile supports image attachments and saves them with the task.
-                    </Text>
-                  </View>
-                  <Ionicons name={attachment ? 'checkmark-circle' : 'image-outline'} size={22} color={theme.primary} />
-                </TouchableOpacity>
-                {attachment && (
-                  <TouchableOpacity onPress={() => setAttachment(null)} className="mb-4 self-start rounded-lg px-3 py-1.5" style={{ backgroundColor: theme.input }}>
-                    <Text className="text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Remove attachment</Text>
-                  </TouchableOpacity>
-                )}
-
-                <TouchableOpacity
-                  onPress={submit}
-                  disabled={submitting}
-                  className="mt-2 h-14 items-center justify-center rounded-2xl"
-                  style={{ backgroundColor: submitting ? theme.primaryPressed : theme.primary }}>
-                  {submitting ? (
-                    <ActivityIndicator color="white" />
-                  ) : (
-                    <Text className="text-[15px] font-bold text-white">Save Task</Text>
+                  {showStartPicker && (
+                    <DateTimePicker
+                      value={parseDate(startDate)}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                      onChange={(event, date) => onDateChange(event, date, 'start')}
+                    />
                   )}
-                </TouchableOpacity>
+                  {showEndPicker && (
+                    <DateTimePicker
+                      value={parseDate(dueDate || startDate)}
+                      minimumDate={startDate ? parseDate(startDate) : undefined}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                      onChange={(event, date) => onDateChange(event, date, 'end')}
+                    />
+                  )}
+                </Section>
+
+                <Section title="Attachments" icon="attach-outline">
+                  <View className="flex-row items-center">
+                    <TouchableOpacity
+                      onPress={pickAttachment}
+                      className="mr-3 h-9 justify-center rounded-lg px-3"
+                      style={{ backgroundColor: theme.primaryLight }}>
+                      <Text className="text-[12px] font-semibold" style={{ color: theme.primary }}>Choose Files</Text>
+                    </TouchableOpacity>
+                    <Text className="flex-1 text-[12px]" numberOfLines={1} style={{ color: mutedColor }}>
+                      {attachment ? attachment.name : 'No file chosen'}
+                    </Text>
+                  </View>
+                  {attachment && (
+                    <TouchableOpacity onPress={() => setAttachment(null)} className="mt-2 self-start">
+                      <Text className="text-[12px] font-semibold" style={{ color: theme.danger }}>Remove attachment</Text>
+                    </TouchableOpacity>
+                  )}
+                </Section>
               </>
             )}
           </View>
         </ScrollView>
+
+        <View
+          className="absolute bottom-0 left-0 right-0 border-t px-5 pt-3"
+          style={{ paddingBottom: Math.max(insets.bottom + 10, 20), backgroundColor: cardBg, borderColor: fieldBorder }}
+        >
+          <TouchableOpacity
+            onPress={submit}
+            disabled={submitting || loadingMeta}
+            className="h-14 items-center justify-center rounded-2xl"
+            style={{ backgroundColor: submitting || loadingMeta ? theme.primaryPressed : theme.primary, opacity: submitting || loadingMeta ? 0.78 : 1 }}
+          >
+            {submitting ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text className="text-[15px] font-bold text-white">Create Task</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+        <SelectorSheet />
       </KeyboardAvoidingView>
     </Modal>
   );

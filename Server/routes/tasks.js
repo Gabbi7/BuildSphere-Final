@@ -73,8 +73,10 @@ function validateTaskPayload(body) {
   const errors = {};
   const title = String(body.title || '').trim();
   const projectId = Number(body.project_id);
-  const phaseId = Number(body.phase_id);
-  const milestoneId = Number(body.milestone_id);
+  const hasPhaseId = body.phase_id !== undefined && body.phase_id !== null && String(body.phase_id).trim() !== '';
+  const hasMilestoneId = body.milestone_id !== undefined && body.milestone_id !== null && String(body.milestone_id).trim() !== '';
+  const phaseId = hasPhaseId ? Number(body.phase_id) : null;
+  const milestoneId = hasMilestoneId ? Number(body.milestone_id) : null;
   const assigneeId = Number(body.assigned_to || body.user_id);
   const priority = String(body.priority || '').toLowerCase();
   const startDate = normalizeDateForInput(body.start_date);
@@ -82,8 +84,12 @@ function validateTaskPayload(body) {
 
   if (!title) errors.title = 'Task title is required.';
   if (!Number.isFinite(projectId) || projectId <= 0) errors.project_id = 'Project is required.';
-  if (!Number.isFinite(phaseId) || phaseId <= 0) errors.phase_id = 'Phase is required.';
-  if (!Number.isFinite(milestoneId) || milestoneId <= 0) errors.milestone_id = 'Milestone is required.';
+  if (hasPhaseId && (!Number.isFinite(phaseId) || phaseId <= 0)) errors.phase_id = 'Invalid phase.';
+  if (hasMilestoneId && (!Number.isFinite(milestoneId) || milestoneId <= 0)) errors.milestone_id = 'Invalid milestone.';
+  if (hasPhaseId !== hasMilestoneId) {
+    if (!hasPhaseId) errors.phase_id = 'Phase is required when a milestone is selected.';
+    if (!hasMilestoneId) errors.milestone_id = 'Milestone is required when a phase is selected.';
+  }
   if (!Number.isFinite(assigneeId) || assigneeId <= 0) errors.assigned_to = 'Assigned user is required.';
   if (!TASK_PRIORITIES.has(priority)) errors.priority = 'Priority must be low, medium, high, or urgent.';
   if (!startDate) errors.start_date = 'Start date is required.';
@@ -259,26 +265,28 @@ router.post(
       return res.status(400).json({ error: 'Invalid task status.' });
     }
 
-    const relationCheck = await pool.query(
-      `SELECT
-         pp.id as phase_id,
-         pm.id as milestone_id
-       FROM project_phases pp
-       JOIN project_milestones pm ON pm.project_phase_id = pp.id
-       WHERE pp.id = $1
-         AND pp.project_id = $2
-         AND pm.id = $3
-         AND pm.project_id = $2`,
-      [values.phaseId, values.projectId, values.milestoneId]
-    );
-    if (relationCheck.rows.length === 0) {
-      return res.status(400).json({
-        error: 'Selected phase and milestone must belong to the selected project.',
-        errors: {
-          phase_id: 'Invalid phase for selected project.',
-          milestone_id: 'Invalid milestone for selected phase.',
-        },
-      });
+    if (values.phaseId && values.milestoneId) {
+      const relationCheck = await pool.query(
+        `SELECT
+           pp.id as phase_id,
+           pm.id as milestone_id
+         FROM project_phases pp
+         JOIN project_milestones pm ON pm.project_phase_id = pp.id
+         WHERE pp.id = $1
+           AND pp.project_id = $2
+           AND pm.id = $3
+           AND pm.project_id = $2`,
+        [values.phaseId, values.projectId, values.milestoneId]
+      );
+      if (relationCheck.rows.length === 0) {
+        return res.status(400).json({
+          error: 'Selected phase and milestone must belong to the selected project.',
+          errors: {
+            phase_id: 'Invalid phase for selected project.',
+            milestone_id: 'Invalid milestone for selected phase.',
+          },
+        });
+      }
     }
 
     const result = await pool.query(
