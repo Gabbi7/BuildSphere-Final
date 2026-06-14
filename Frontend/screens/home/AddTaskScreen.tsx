@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  useWindowDimensions,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
 
 interface ProjectOption {
   id: number;
@@ -184,6 +186,8 @@ export default function AddTaskScreen({
 }: AddTaskScreenProps) {
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const formContentStyle = centeredContent(width, FORM_CONTENT_MAX_WIDTH);
   const [loadingMeta, setLoadingMeta] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [dbProjects, setDbProjects] = useState<ProjectOption[]>(projects);
@@ -578,8 +582,8 @@ export default function AddTaskScreen({
         style={{ backgroundColor: modalBg }}
       >
         <View
-          className="border-b px-5 pb-4"
-          style={{ paddingTop: Math.max(insets.top + 12, 48), borderColor: fieldBorder, backgroundColor: cardBg }}
+          className="border-b pb-4"
+          style={[formContentStyle, { paddingTop: Math.max(insets.top + 12, 48), borderColor: fieldBorder, backgroundColor: cardBg }]}
         >
           <View className="flex-row items-center justify-between">
             <TouchableOpacity
@@ -597,13 +601,13 @@ export default function AddTaskScreen({
         </View>
 
         <ScrollView
-          className="flex-1 px-5"
+          className="flex-1"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           onScrollBeginDrag={Keyboard.dismiss}
           contentContainerStyle={{ paddingTop: 16, paddingBottom: Math.max(insets.bottom + 104, 132) }}
         >
-          <View>
+          <View style={formContentStyle}>
             {loadingMeta ? (
               <View className="items-center rounded-2xl border py-12" style={{ backgroundColor: cardBg, borderColor: fieldBorder }}>
                 <ActivityIndicator color={theme.primary} />
@@ -771,21 +775,23 @@ export default function AddTaskScreen({
         </ScrollView>
 
         <View
-          className="absolute bottom-0 left-0 right-0 border-t px-5 pt-3"
+          className="absolute bottom-0 left-0 right-0 border-t pt-3"
           style={{ paddingBottom: Math.max(insets.bottom + 10, 20), backgroundColor: cardBg, borderColor: fieldBorder }}
         >
-          <TouchableOpacity
-            onPress={submit}
-            disabled={submitting || loadingMeta}
-            className="h-14 items-center justify-center rounded-2xl"
-            style={{ backgroundColor: submitting || loadingMeta ? theme.primaryPressed : theme.primary, opacity: submitting || loadingMeta ? 0.78 : 1 }}
-          >
-            {submitting ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <Text className="text-[15px] font-bold text-white">Create Task</Text>
-            )}
-          </TouchableOpacity>
+          <View style={formContentStyle}>
+            <TouchableOpacity
+              onPress={submit}
+              disabled={submitting || loadingMeta}
+              className="h-14 items-center justify-center rounded-2xl"
+              style={{ backgroundColor: submitting || loadingMeta ? theme.primaryPressed : theme.primary, opacity: submitting || loadingMeta ? 0.78 : 1 }}
+            >
+              {submitting ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text className="text-[15px] font-bold text-white">Create Task</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
         <SelectorSheet />
       </KeyboardAvoidingView>

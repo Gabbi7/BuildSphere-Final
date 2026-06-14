@@ -49,6 +49,7 @@ function AppContent() {
   const [recoveryError, setRecoveryError] = useState('');
   const [authNotice, setAuthNotice] = useState('');
   const [resetEmail, setResetEmail] = useState('');
+  const [resetOtp, setResetOtp] = useState('');
   const otpRecoveryFlowRef = useRef(false);
   const { theme, isDark } = useAppTheme();
 
@@ -58,6 +59,7 @@ function AppContent() {
     setPendingNotificationData(null);
     setAuthScreen('login');
     setResetEmail('');
+    setResetOtp('');
     otpRecoveryFlowRef.current = false;
   }, []);
 
@@ -224,6 +226,7 @@ function AppContent() {
       setRecoveryLoading(false);
       setRecoveryError('');
       setResetEmail('');
+      setResetOtp('');
       otpRecoveryFlowRef.current = false;
     }
   };
@@ -280,6 +283,7 @@ function AppContent() {
         setPendingNotificationData(null);
         setAuthScreen('login');
         setResetEmail('');
+        setResetOtp('');
         otpRecoveryFlowRef.current = false;
         return;
       }
@@ -387,6 +391,7 @@ function AppContent() {
           onBackToLogin={handleBackToLogin}
           onOtpSent={(email) => {
             setResetEmail(email);
+            setResetOtp('');
             otpRecoveryFlowRef.current = true;
             setAuthScreen('verify-reset-otp');
           }}
@@ -401,9 +406,15 @@ function AppContent() {
         <StatusBar style={isDark ? 'light' : 'dark'} />
         <VerifyResetOtpScreen
           email={resetEmail}
-          onBack={() => setAuthScreen('forgot')}
+          onBack={() => {
+            setResetOtp('');
+            setAuthScreen('forgot');
+          }}
           onBackToLogin={handleBackToLogin}
-          onVerified={() => setAuthScreen('create-new-password')}
+          onVerified={(otp) => {
+            setResetOtp(otp);
+            setAuthScreen('create-new-password');
+          }}
         />
       </SafeAreaProvider>
     );
@@ -413,7 +424,7 @@ function AppContent() {
     return (
       <SafeAreaProvider>
         <StatusBar style={isDark ? 'light' : 'dark'} />
-        <CreateNewPasswordScreen onBackToLogin={handleBackToLogin} />
+        <CreateNewPasswordScreen email={resetEmail} otp={resetOtp} onBackToLogin={handleBackToLogin} />
       </SafeAreaProvider>
     );
   }

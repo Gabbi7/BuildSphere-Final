@@ -12,6 +12,7 @@ import {
   Dimensions,
   KeyboardAvoidingView,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +26,8 @@ import { UserInfo } from '../../App';
 import { analyzeGlassPanelsWithGemini, GeminiAuditResult } from '../../lib/generative-ai';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText, TaskCardSkeleton } from '../../components/skeletons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
 
 interface Props {
   visible: boolean;
@@ -72,6 +75,9 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function UploadSiteProgressScreen({ visible, user, onClose, projects, initialTask }: Props) {
   const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const formContentStyle = centeredContent(width, FORM_CONTENT_MAX_WIDTH);
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedPhotos, setSelectedPhotos] = useState<SelectedPhoto[]>([]);
   const [projectId, setProjectId] = useState<number | null>(initialTask?.project_id || null);
@@ -477,7 +483,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
           <>
 
             {/* Header */}
-            <View className="flex-row items-center justify-between border-b px-5 pb-4 pt-10" style={{ borderColor: theme.border, backgroundColor: theme.background }}>
+            <View className="flex-row items-center justify-between border-b pb-4" style={[formContentStyle, { paddingTop: Math.max(insets.top + 12, 44), borderColor: theme.border, backgroundColor: theme.background }]}>
               <TouchableOpacity onPress={handleClose}>
                 <Ionicons name="close" size={24} color={theme.text} />
               </TouchableOpacity>
@@ -485,7 +491,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               <View style={{ width: 24 }} />
             </View>
 
-            <ScrollView className="flex-1 px-5 pt-5" contentContainerStyle={{ paddingBottom: 40 }}>
+            <ScrollView className="flex-1 pt-5" contentContainerStyle={{ paddingBottom: 40 }}>
+              <View style={formContentStyle}>
               {/* Photo Grid / List */}
               {selectedPhotos.length > 0 ? (
                 <View className="mb-6">
@@ -651,12 +658,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 placeholderTextColor={theme.textMuted}
                 multiline
               />
-
-
+              </View>
             </ScrollView>
 
             {/* Footer Buttons */}
-            <View className="flex-row gap-3 border-t px-5 pb-10 pt-3" style={{ borderColor: theme.border, backgroundColor: theme.background }}>
+            <View className="flex-row gap-3 border-t pb-10 pt-3" style={[formContentStyle, { borderColor: theme.border, backgroundColor: theme.background }]}>
               <TouchableOpacity
                 onPress={handleClose}
                 className="h-12 flex-1 items-center justify-center rounded-[14px] border"
@@ -677,7 +683,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         {step === 2 && selectedPhotos.length > 0 && (
           <View className="flex-1" style={{ backgroundColor: theme.background }}>
             {/* Header */}
-            <View className="flex-row items-center border-b px-5 pb-4 pt-10" style={{ backgroundColor: theme.background, borderColor: theme.border }}>
+            <View className="flex-row items-center border-b pb-4" style={[formContentStyle, { paddingTop: Math.max(insets.top + 12, 44), backgroundColor: theme.background, borderColor: theme.border }]}>
               <TouchableOpacity onPress={() => setStep(1)} className="-ml-2 -mt-1 mr-3">
                 <Ionicons name="caret-back-outline" size={24} color={theme.text} />
               </TouchableOpacity>
@@ -801,7 +807,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         {/* ── STEP 3: Form Details ── */}
         {step === 3 && (
           <>
-            <View className="flex-row items-center border-b px-5 pb-4 pt-10" style={{ borderColor: theme.border, backgroundColor: theme.background }}>
+            <View className="flex-row items-center border-b pb-4" style={[formContentStyle, { paddingTop: Math.max(insets.top + 12, 44), borderColor: theme.border, backgroundColor: theme.background }]}>
               <TouchableOpacity onPress={() => setStep(selectedPhotos.length > 0 ? 2 : 1)} className="-ml-2 -mt-1 mr-3">
                 <Ionicons name="caret-back-outline" size={24} color={theme.text} />
               </TouchableOpacity>
@@ -846,7 +852,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               </View>
             )}
 
-            <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingTop: 20, paddingBottom: 40 }}>
+            <ScrollView className="flex-1" contentContainerStyle={{ paddingTop: 20, paddingBottom: 40 }}>
+              <View style={formContentStyle}>
               <Text className="mb-1.5 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Task</Text>
               <TouchableOpacity
                 onPress={() => setIsTaskModalVisible(true)}
@@ -1021,10 +1028,10 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   </Text>
                 </View>
               </View>
-
+              </View>
             </ScrollView>
 
-            <View className="border-t px-5 pb-10 pt-3" style={{ borderColor: theme.border, backgroundColor: theme.background }}>
+            <View className="border-t pb-10 pt-3" style={[formContentStyle, { borderColor: theme.border, backgroundColor: theme.background }]}>
               <TouchableOpacity
                 onPress={handleSave}
                 disabled={saving}
@@ -1077,7 +1084,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       {/* ── Task Selection Modal ── */}
       <Modal visible={isTaskModalVisible} animationType="slide" transparent>
         <View className="flex-1 justify-end" style={{ backgroundColor: theme.overlay }}>
-          <View className="h-[60%] w-full rounded-t-[30px] p-6" style={{ backgroundColor: theme.elevated }}>
+          <View className="h-[60%] w-full rounded-t-[30px] p-6" style={{ backgroundColor: theme.elevated, maxWidth: 680, alignSelf: 'center' }}>
             <View className="mb-6 flex-row items-center justify-between">
               <Text className="text-[18px] font-bold" style={{ color: theme.text }}>Select Task</Text>
               <TouchableOpacity onPress={() => setIsTaskModalVisible(false)}>
@@ -1136,7 +1143,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       {/* ── Shift Selection Modal ── */}
       <Modal visible={isShiftModalVisible} animationType="slide" transparent>
         <View className="flex-1 justify-end" style={{ backgroundColor: theme.overlay }}>
-          <View className="h-[40%] w-full rounded-t-[30px] p-6" style={{ backgroundColor: theme.elevated }}>
+          <View className="h-[40%] w-full rounded-t-[30px] p-6" style={{ backgroundColor: theme.elevated, maxWidth: 560, alignSelf: 'center' }}>
             <View className="mb-6 flex-row items-center justify-between">
               <Text className="text-[18px] font-bold" style={{ color: theme.text }}>Select Shift</Text>
               <TouchableOpacity onPress={() => setIsShiftModalVisible(false)}>

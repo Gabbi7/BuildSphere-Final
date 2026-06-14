@@ -19,7 +19,7 @@ interface VerifyResetOtpScreenProps {
   email: string;
   onBack: () => void;
   onBackToLogin: () => void;
-  onVerified: () => void;
+  onVerified: (otp: string) => void;
 }
 
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -65,9 +65,10 @@ export default function VerifyResetOtpScreen({
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_SECONDS);
   const [message, setMessage] = useState('If an account exists for this email, we sent a password reset code.');
   const [errorMessage, setErrorMessage] = useState(normalizedEmail ? '' : 'Email is missing. Please request a new OTP.');
+  const [otpFocused, setOtpFocused] = useState(false);
 
   useEffect(() => {
-    console.log('OTP screen email:', normalizedEmail);
+    console.log('OTP screen received email:', normalizedEmail ? 'yes' : 'no');
   }, [normalizedEmail]);
 
   useEffect(() => {
@@ -76,15 +77,15 @@ export default function VerifyResetOtpScreen({
     return () => clearTimeout(timer);
   }, [cooldown]);
 
-  const inputBoxStyle = {
+  const inputBoxStyle = (hasError = false) => ({
     shadowColor: theme.primary,
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
+    shadowOpacity: otpFocused ? 0.2 : 0.08,
+    shadowRadius: otpFocused ? 10 : 6,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    elevation: otpFocused ? 3 : 1,
     borderWidth: 1,
-    borderColor: theme.border,
-  } as const;
+    borderColor: hasError ? '#DC2626' : otpFocused ? theme.primary : theme.border,
+  } as const);
 
   const handleVerify = async () => {
     if (!normalizedEmail) {
@@ -93,16 +94,9 @@ export default function VerifyResetOtpScreen({
     }
 
     const cleanedOtp = otp.replace(/\s/g, '').trim();
+    console.log('Clean OTP length:', cleanedOtp.length);
     if (!cleanedOtp) {
       setErrorMessage('Enter the OTP code sent to your email.');
-      return;
-    }
-    if (!/^\d+$/.test(cleanedOtp)) {
-      setErrorMessage('OTP should contain numbers only.');
-      return;
-    }
-    if (cleanedOtp.length < 6) {
-      setErrorMessage('Enter the complete OTP code sent to your email.');
       return;
     }
 
@@ -116,9 +110,11 @@ export default function VerifyResetOtpScreen({
         token: cleanedOtp,
         type: 'recovery',
       });
+      console.log('verifyOtp recovery result:', error ? `error: ${error.message}` : 'success');
+
       if (error) throw error;
 
-      onVerified();
+      onVerified(cleanedOtp);
     } catch (error) {
       setErrorMessage(getOtpErrorMessage(error));
     } finally {
@@ -138,10 +134,10 @@ export default function VerifyResetOtpScreen({
     setMessage('');
 
     try {
-      console.log('Forgot password email:', normalizedEmail);
-      console.log('resetPasswordForEmail called');
+      console.log('Resend password reset normalized email:', normalizedEmail);
       const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail);
-      console.log('resetPasswordForEmail error:', error?.message);
+      console.log('resend resetPasswordForEmail result:', error ? `error: ${error.message}` : 'success');
+
       if (error) throw error;
 
       setOtp('');
@@ -181,39 +177,51 @@ export default function VerifyResetOtpScreen({
             showsVerticalScrollIndicator={false}>
             <View className="w-full max-w-[360px] items-center">
               <Image source={require('../../assets/Buildspherelogo4x.png')} style={{ width: 56, height: 56 }} resizeMode="contain" />
-              <Text className="mt-5 text-[22px] font-bold" style={{ color: theme.text }}>Enter OTP</Text>
-              <Text className="mt-2 text-center text-[12.5px] leading-5" style={{ color: theme.textMuted }}>
-                {normalizedEmail ? `Enter the code sent to ${maskEmail(normalizedEmail)}.` : 'Email is missing. Please request a new OTP.'}
+              <Text className="mt-5 text-center text-[22px] font-bold" style={{ color: theme.text, letterSpacing: 0 }}>
+                Enter OTP
               </Text>
+              <Text className="mt-2 text-center text-[12.5px] leading-5" style={{ color: theme.textMuted }}>
+                Enter the code sent to your email.
+              </Text>
+              {normalizedEmail ? (
+                <Text className="mt-1 text-center text-[12px] leading-5" style={{ color: theme.textMuted }}>
+                  {maskEmail(normalizedEmail)}
+                </Text>
+              ) : (
+                <Text className="mt-1 text-center text-[12px] leading-5" style={{ color: '#DC2626' }}>
+                  Email is missing. Please request a new OTP.
+                </Text>
+              )}
 
               <View className="mt-10 w-full">
                 <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>OTP Code</Text>
-                <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
+                <View className="rounded-xl" style={[inputBoxStyle(Boolean(errorMessage)), { backgroundColor: theme.input }]}>
                   <TextInput
                     value={otp}
                     onChangeText={(value) => {
-                      setOtp(value.replace(/\s/g, '').replace(/\D/g, '').slice(0, 10));
+                      setOtp(value.replace(/\s/g, ''));
                       setErrorMessage('');
                     }}
                     placeholder="Enter OTP"
                     placeholderTextColor={theme.textMuted}
                     keyboardType="number-pad"
                     textContentType="oneTimeCode"
-                    maxLength={10}
+                    onFocus={() => setOtpFocused(true)}
+                    onBlur={() => setOtpFocused(false)}
                     className="h-[52px] px-4 text-center text-[20px] font-semibold"
-                    style={{ color: theme.text, letterSpacing: 4 }}
+                    style={{ color: theme.text, letterSpacing: 0.8 }}
                   />
                 </View>
+
+                {errorMessage ? (
+                  <Text className="mt-2 text-[12px] leading-5" style={{ color: '#DC2626' }}>
+                    {errorMessage}
+                  </Text>
+                ) : null}
 
                 {message ? (
                   <Text className="mt-5 text-center text-[13px] leading-5" style={{ color: theme.textSecondary }}>
                     {message}
-                  </Text>
-                ) : null}
-
-                {errorMessage ? (
-                  <Text className="mt-5 text-center text-[13px] leading-5" style={{ color: '#DC2626' }}>
-                    {errorMessage}
                   </Text>
                 ) : null}
 

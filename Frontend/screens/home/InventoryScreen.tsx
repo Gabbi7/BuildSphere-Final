@@ -11,6 +11,7 @@ import {
   Platform,
   KeyboardAvoidingView,
   TouchableWithoutFeedback,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
@@ -20,6 +21,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
 import { InventoryItemSkeleton, InventoryLogSkeleton } from '../../components/skeletons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { centeredContent } from '../../utils/responsive';
 
 interface InventoryItem {
   id: number;
@@ -104,6 +106,8 @@ export default function InventoryScreen({
   const canAdd = perms.canAddInventory;
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const screenContentStyle = centeredContent(width);
   const headerTopPadding = Math.max(insets.top + 10, Platform.OS === 'ios' ? 64 : 20);
 
   const [activeTab, setActiveTab] = useState<'items' | 'logs'>('items');
@@ -126,9 +130,6 @@ export default function InventoryScreen({
   const [addPrice, setAddPrice] = useState('');
   const [addUnit, setAddUnit] = useState('pcs');
   const [saving, setSaving] = useState(false);
-  const [editItem, setEditItem] = useState<InventoryItem | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editQty, setEditQty] = useState('');
   // Transaction modal state
   const [showTransaction, setShowTransaction] = useState(false);
   const [txnItem, setTxnItem] = useState<InventoryItem | null>(null);
@@ -355,29 +356,6 @@ export default function InventoryScreen({
     );
   };
 
-  const handleUpdate = async () => {
-    if (!editItem) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`${API_URL}/inventory/${editItem.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          itemName: editName,
-          updatedBy: userId,
-        }),
-      });
-      if (!res.ok) throw new Error('Unable to update item.');
-      Alert.alert('Success', 'Item details updated.');
-      setEditItem(null);
-      await load();
-    } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Failed to update item.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   // ── Phase 2: Record Transaction (replaces direct stock edits) ──
   const submitTransaction = async () => {
     if (!txnItem) return;
@@ -532,15 +510,15 @@ export default function InventoryScreen({
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <View
-        className="flex-row items-center px-5 pb-3"
-        style={{ paddingTop: headerTopPadding }}>
+        className="flex-row items-center pb-3"
+        style={[screenContentStyle, { paddingTop: headerTopPadding }]}>
         <TouchableOpacity onPress={onBack} className="mr-3 -ml-2 h-10 w-8 items-center justify-center">
           <Ionicons name="caret-back-outline" size={24} color={theme.text} />
         </TouchableOpacity>
         <Text className="text-[28px] font-bold" style={{ color: theme.primary }}>Inventory</Text>
       </View>
 
-      <View className="px-5 pb-3">
+      <View className="pb-3" style={screenContentStyle}>
         <View className="mb-2 flex-row rounded-full border p-1" style={{ backgroundColor: theme.input, borderColor: theme.border }}>
           <TouchableOpacity
             className="flex-1 rounded-full py-2"
@@ -607,21 +585,27 @@ export default function InventoryScreen({
       </View>
 
       {canAdd && activeTab === 'items' && (
-        <TouchableOpacity onPress={() => setShowAdd(true)} className="mx-5 mb-3 h-[48px] items-center justify-center rounded-[12px]" style={{ backgroundColor: theme.primary }}>
-          <Text className="text-[15px] font-bold text-white">Add Inventory Item</Text>
-        </TouchableOpacity>
+        <View style={screenContentStyle}>
+          <TouchableOpacity onPress={() => setShowAdd(true)} className="mb-3 h-[48px] items-center justify-center rounded-[12px]" style={{ backgroundColor: theme.primary }}>
+            <Text className="text-[15px] font-bold text-white">Add Inventory Item</Text>
+          </TouchableOpacity>
+        </View>
       )}
       {canEdit && activeTab === 'logs' && (
-        <TouchableOpacity onPress={() => setShowAddLog(true)} className="mx-5 mb-3 h-[44px] items-center justify-center rounded-[12px]" style={{ backgroundColor: theme.primaryPressed }}>
-          <Text className="text-[14px] font-bold text-white">Add Log Entry</Text>
-        </TouchableOpacity>
+        <View style={screenContentStyle}>
+          <TouchableOpacity onPress={() => setShowAddLog(true)} className="mb-3 h-[44px] items-center justify-center rounded-[12px]" style={{ backgroundColor: theme.primaryPressed }}>
+            <Text className="text-[14px] font-bold text-white">Add Log Entry</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       {loading ? (
-        <ScrollView contentContainerStyle={{ paddingBottom: showBottomNav ? 150 : 110 }} className="px-5">
+        <ScrollView contentContainerStyle={{ paddingBottom: showBottomNav ? 150 : 110 }}>
+          <View style={screenContentStyle}>
           {activeTab === 'items'
             ? Array.from({ length: 5 }).map((_, index) => <InventoryItemSkeleton key={index} />)
             : Array.from({ length: 4 }).map((_, index) => <InventoryLogSkeleton key={index} />)}
+          </View>
         </ScrollView>
       ) : error ? (
         <View className="mt-12 items-center px-8">
@@ -632,7 +616,8 @@ export default function InventoryScreen({
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: showBottomNav ? 150 : 110 }} className="px-5">
+        <ScrollView contentContainerStyle={{ paddingBottom: showBottomNav ? 150 : 110 }}>
+          <View style={screenContentStyle}>
           <TouchableOpacity onPress={refresh} className="mb-2 self-end rounded-md px-3 py-1" style={{ backgroundColor: theme.primaryLight }}>
             <Text className="text-[12px]" style={{ color: theme.primary }}>{refreshing ? 'Refreshing...' : 'Refresh'}</Text>
           </TouchableOpacity>
@@ -663,7 +648,6 @@ export default function InventoryScreen({
                       if (!canEdit) return;
                       Alert.alert(item.item_name, 'Choose action', [
                         { text: 'Record Transaction', onPress: () => { setTxnItem(item); setTxnAction('RECEIVING'); setTxnQty(''); setTxnNotes(''); setTxnTaskId(''); setShowTransaction(true); } },
-                        { text: 'Edit Details', onPress: () => { setEditItem(item); setEditName(item.item_name); setEditQty(String(item.quantity)); } },
                         { text: 'Delete', style: 'destructive', onPress: () => handleDelete(item.id) },
                         { text: 'Cancel', style: 'cancel' },
                       ]);
@@ -740,7 +724,7 @@ export default function InventoryScreen({
                           </View>
 
                           <View className="mb-3 space-y-2">
-                            <View className="flex-row items-center">
+                            <View className="mb-1 min-w-0 flex-1 flex-row items-center pr-2">
                               <Ionicons name="business-outline" size={14} color={theme.primary} />
                               <Text className="ml-2 flex-1 text-[12px]" style={{ color: theme.textSecondary }}>
                                 <Text className="font-semibold" style={{ color: theme.text }}>Project: </Text>
@@ -763,15 +747,15 @@ export default function InventoryScreen({
                             </View>
                           </View>
 
-                          <View className="flex-row items-center justify-between border-t pt-3" style={{ borderColor: theme.border }}>
+                          <View className="flex-row flex-wrap items-center justify-between border-t pt-3" style={{ borderColor: theme.border }}>
                             <View className="flex-row items-center">
                               <Ionicons name="calendar-outline" size={12} color={theme.textMuted} />
-                              <Text className="ml-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>
+                              <Text className="ml-1 flex-1 text-[11px] font-medium" style={{ color: theme.textMuted }} numberOfLines={2}>
                                 {new Date(log.created_at).toLocaleDateString()} • {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </Text>
                             </View>
-                            <View className="rounded-md px-2 py-1" style={{ backgroundColor: theme.input }}>
-                              <Text className="text-[9px] font-bold uppercase tracking-wider" style={{ color: theme.textMuted }}>
+                            <View className="mb-1 rounded-md px-2 py-1" style={{ backgroundColor: theme.input }}>
+                              <Text className="text-[9px] font-bold uppercase tracking-wider" style={{ color: theme.textMuted }} numberOfLines={1}>
                                 {ACTION_LABELS[log.action_type] || log.action_type}
                               </Text>
                             </View>
@@ -789,13 +773,14 @@ export default function InventoryScreen({
                 })}
               </View>
             ))}
+          </View>
         </ScrollView>
       )}
         <Modal visible={showAdd} transparent animationType="slide" onRequestClose={closeAddItemModal}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 justify-center px-6" style={{ backgroundColor: theme.overlay }}>
             <TouchableOpacity activeOpacity={1} onPress={closeAddItemModal} className="absolute inset-0" />
             <TouchableWithoutFeedback>
-              <View className="max-h-[86%] rounded-3xl" style={{ backgroundColor: theme.elevated }}>
+              <View className="max-h-[86%] w-full rounded-3xl" style={{ backgroundColor: theme.elevated, maxWidth: 560, alignSelf: 'center' }}>
                 <View className="flex-row items-center justify-between border-b px-6 py-4" style={{ borderColor: theme.border }}>
                   <Text className="text-[18px] font-bold" style={{ color: theme.primary }}>Add Inventory Item</Text>
                   <TouchableOpacity onPress={closeAddItemModal} className="h-9 w-9 items-center justify-center rounded-full" style={{ backgroundColor: theme.input }}>
@@ -832,24 +817,11 @@ export default function InventoryScreen({
           </KeyboardAvoidingView>
         </Modal>
 
-        <Modal visible={!!editItem} transparent animationType="fade" onRequestClose={() => setEditItem(null)}>
-          <View className="flex-1 items-center justify-center px-6" style={{ backgroundColor: theme.overlay }}>
-            <View className="w-full max-w-sm rounded-3xl p-6" style={{ backgroundColor: theme.elevated }}>
-              <Text className="mb-4 text-center text-[18px] font-bold" style={{ color: theme.primary }}>Edit Item Details</Text>
-              <TextInput value={editName} onChangeText={setEditName} style={inputStyle} placeholder="Item name" placeholderTextColor={theme.textMuted} />
-              <Text className="mb-2 text-[11px]" style={{ color: theme.textMuted }}>To change stock quantity, use "Record Transaction" instead.</Text>
-              <TouchableOpacity onPress={handleUpdate} disabled={saving} className="h-12 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primary }}>
-                {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Update Details</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
         <Modal visible={showTransaction} transparent animationType="slide" onRequestClose={closeTransactionModal}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 justify-center px-6" style={{ backgroundColor: theme.overlay }}>
             <TouchableOpacity activeOpacity={1} onPress={closeTransactionModal} className="absolute inset-0" />
             <TouchableWithoutFeedback>
-            <View className="max-h-[86%] rounded-3xl p-6" style={{ backgroundColor: theme.elevated }}>
+            <View className="max-h-[86%] w-full rounded-3xl p-6" style={{ backgroundColor: theme.elevated, maxWidth: 560, alignSelf: 'center' }}>
               <View className="mb-4 flex-row items-start justify-between">
                 <View className="flex-1 pr-3">
                   <Text className="text-[18px] font-bold" style={{ color: theme.primary }}>Record Transaction</Text>
@@ -901,7 +873,7 @@ export default function InventoryScreen({
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 items-center justify-center px-6" style={{ backgroundColor: theme.overlay }}>
             <TouchableOpacity activeOpacity={1} onPress={closeAddLogModal} className="absolute inset-0" />
             <TouchableWithoutFeedback>
-            <View className="max-h-[86%] w-full rounded-3xl p-6" style={{ backgroundColor: theme.elevated }}>
+            <View className="max-h-[86%] w-full rounded-3xl p-6" style={{ backgroundColor: theme.elevated, maxWidth: 560, alignSelf: 'center' }}>
               <View className="mb-4 flex-row items-start justify-between">
                 <View className="flex-1 pr-3">
                   <Text className="text-[18px] font-bold" style={{ color: theme.primary }}>Add Inventory Log</Text>

@@ -9,6 +9,7 @@ import {
   TouchableWithoutFeedback,
   ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -33,6 +34,8 @@ export default function ResetPasswordScreen({
   const { theme, isDark } = useAppTheme();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -161,29 +164,43 @@ export default function ResetPasswordScreen({
 
               <View className="mt-10 w-full">
                 <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>New Password</Text>
-                <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
+                <View className="flex-row items-center rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
                   <TextInput
                     value={newPassword}
                     onChangeText={setNewPassword}
                     placeholder="Enter new password"
                     placeholderTextColor={theme.textMuted}
-                    secureTextEntry
-                    className="h-[52px] px-4"
+                    secureTextEntry={!showNewPassword}
+                    className="h-[52px] flex-1 pl-4 pr-2"
                     style={{ color: theme.text }}
                   />
+                  <TouchableOpacity
+                    onPress={() => setShowNewPassword((current) => !current)}
+                    className="h-[52px] w-[52px] items-center justify-center"
+                    accessibilityRole="button"
+                    accessibilityLabel={showNewPassword ? 'Hide new password' : 'Show new password'}>
+                    <Ionicons name={showNewPassword ? 'eye-outline' : 'eye-off-outline'} size={22} color={theme.textMuted} />
+                  </TouchableOpacity>
                 </View>
 
                 <Text className="mb-2 mt-6 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Confirm Password</Text>
-                <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
+                <View className="flex-row items-center rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
                   <TextInput
                     value={confirmPassword}
                     onChangeText={setConfirmPassword}
                     placeholder="Confirm new password"
                     placeholderTextColor={theme.textMuted}
-                    secureTextEntry
-                    className="h-[52px] px-4"
+                    secureTextEntry={!showConfirmPassword}
+                    className="h-[52px] flex-1 pl-4 pr-2"
                     style={{ color: theme.text }}
                   />
+                  <TouchableOpacity
+                    onPress={() => setShowConfirmPassword((current) => !current)}
+                    className="h-[52px] w-[52px] items-center justify-center"
+                    accessibilityRole="button"
+                    accessibilityLabel={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}>
+                    <Ionicons name={showConfirmPassword ? 'eye-outline' : 'eye-off-outline'} size={22} color={theme.textMuted} />
+                  </TouchableOpacity>
                 </View>
 
                 {recoveryLoading ? (

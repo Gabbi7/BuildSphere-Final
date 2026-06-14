@@ -13,6 +13,7 @@ const supabaseAdmin =
   process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
     ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
     : null;
+let passwordResetTableReady = false;
 
 function signAuthToken(user) {
   if (!JWT_SECRET) {
@@ -44,10 +45,27 @@ function isExpiredToken(row) {
   return Date.now() - tokenTime > OTP_EXPIRY_MS;
 }
 
+async function ensurePasswordResetTable() {
+  if (passwordResetTableReady) return;
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id SERIAL PRIMARY KEY,
+      email TEXT NOT NULL,
+      token TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_email_created_at
+      ON password_reset_tokens (email, created_at DESC)
+  `);
+
+  passwordResetTableReady = true;
+}
+
 async function findSupabaseUserIdByEmail(email) {
-  if (!supabaseAdmin) {
-    throw new Error('Missing Supabase service-role config.');
-  }
+  if (!supabaseAdmin) return null;
 
   let page = 1;
   const perPage = 1000;
@@ -66,6 +84,8 @@ async function findSupabaseUserIdByEmail(email) {
 }
 
 async function validateResetOtp(email, otp) {
+  await ensurePasswordResetTable();
+
   const result = await pool.query('SELECT * FROM password_reset_tokens WHERE email = $1 ORDER BY created_at DESC LIMIT 1', [email]);
   const tokenRow = result.rows[0];
 
@@ -162,6 +182,8 @@ router.post('/forgot-password', async (req, res) => {
   }
 
   try {
+    await ensurePasswordResetTable();
+
     const userResult = await pool.query('SELECT id FROM "public"."users" WHERE LOWER(email) = LOWER($1)', [email]);
     if (userResult.rows.length === 0) {
       return res.json({ success: true, message: 'If registered, an OTP was sent.' });
@@ -230,18 +252,22 @@ router.post('/reset-password', async (req, res) => {
       return res.status(400).json({ error: 'Invalid or expired OTP.' });
     }
 
-    const authUserId = await findSupabaseUserIdByEmail(email);
-    if (!authUserId) {
-      return res.status(400).json({ error: 'No authentication account is linked to this email.' });
+    const hashed = await bcrypt.hash(newPassword, 10);
+    const updateResult = await pool.query('UPDATE "public"."users" SET password = $1 WHERE LOWER(email) = LOWER($2)', [hashed, email]);
+    if (updateResult.rowCount === 0) {
+      return res.status(400).json({ error: 'No account found with that email.' });
     }
 
-    const { error: updateAuthError } = await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-      password: newPassword,
-    });
-    if (updateAuthError) throw updateAuthError;
+    const authUserId = await findSupabaseUserIdByEmail(email);
+    if (authUserId) {
+      const { error: updateAuthError } = await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+        password: newPassword,
+      });
+      if (updateAuthError) {
+        console.warn('SUPABASE_AUTH_PASSWORD_SYNC_FAILED:', updateAuthError);
+      }
+    }
 
-    const hashed = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE "public"."users" SET password = $1 WHERE LOWER(email) = LOWER($2)', [hashed, email]);
     await pool.query('DELETE FROM password_reset_tokens WHERE email = $1', [email]);
 
     res.json({ success: true, message: 'Password has been successfully reset.' });

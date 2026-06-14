@@ -6,11 +6,13 @@ import {
   ScrollView,
   Modal,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, TaskCardSkeleton } from '../../components/skeletons';
+import { centeredContent } from '../../utils/responsive';
 
 interface Task {
   id: number;
@@ -71,6 +73,8 @@ export default function MyWork({
   const [filterBy, setFilterBy] = useState<'all' | 'high_priority' | 'medium_priority' | 'low_priority'>('all');
   const [error, setError] = useState<string | null>(null);
   const { theme } = useAppTheme();
+  const { width } = useWindowDimensions();
+  const screenContentStyle = centeredContent(width);
 
   const TABS: { label: Tab; color: string }[] = [
     { label: 'To Do', color: '#FF6B6B' },
@@ -212,7 +216,7 @@ export default function MyWork({
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
-      <View className="px-5 pt-10">
+      <View className="pt-10" style={screenContentStyle}>
         <Text className="text-[32px] font-bold" style={{ color: theme.primary }}>Task</Text>
 
 
@@ -240,7 +244,9 @@ export default function MyWork({
                   </Text>
                 )}
                 <Text
-                  className={`text-[11px] font-semibold ${isActive ? tab.color : '#A3A3A3'}`}
+                  className={`text-center text-[11px] font-semibold ${isActive ? tab.color : '#A3A3A3'}`}
+                  numberOfLines={2}
+                  adjustsFontSizeToFit
                   style={{ color: isActive ? tab.color : theme.textMuted }}>
                   {tab.label}
                 </Text>
@@ -285,9 +291,10 @@ export default function MyWork({
       </View>
 
       <ScrollView
-        className="mt-4 flex-1 px-5"
+        className="mt-4 flex-1"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}>
+        <View style={screenContentStyle}>
         {loading ? (
           <View style={{ marginTop: 4 }}>
             {Array.from({ length: 5 }).map((_, index) => (
@@ -337,11 +344,11 @@ export default function MyWork({
                       {task.title}
                     </Text>
                     <View className="mt-1.5 flex-row items-center">
-                      <Text className="text-[12px]" style={{ color: theme.textMuted }}>{task.project}</Text>
+                      <Text className="min-w-0 flex-shrink text-[12px]" style={{ color: theme.textMuted }} numberOfLines={1}>{task.project}</Text>
                       {task.phase && (
                         <>
                           <View className="mx-2 h-1 w-1 rounded-full" style={{ backgroundColor: theme.border }} />
-                          <Text className="text-[12px]" style={{ color: theme.textMuted }}>{task.phase}</Text>
+                          <Text className="min-w-0 flex-shrink text-[12px]" style={{ color: theme.textMuted }} numberOfLines={1}>{task.phase}</Text>
                         </>
                       )}
                     </View>
@@ -359,6 +366,7 @@ export default function MyWork({
             </TouchableOpacity>
           ))
         )}
+        </View>
       </ScrollView>
 
       {/* Project Selection Modal */}
@@ -373,7 +381,7 @@ export default function MyWork({
           activeOpacity={1}
           onPress={() => setShowProjectModal(false)}
         >
-          <View className="rounded-t-[30px] p-6 pb-10 max-h-[70%]" style={{ backgroundColor: theme.elevated }}>
+          <View className="rounded-t-[30px] p-6 pb-10 max-h-[70%]" style={[{ backgroundColor: theme.elevated }, screenContentStyle]}>
             <View className="w-10 h-1 self-center rounded-full mb-6" style={{ backgroundColor: theme.border }} />
             <Text className="text-xl font-bold mb-6 text-center" style={{ color: theme.text }}>Select Project</Text>
             

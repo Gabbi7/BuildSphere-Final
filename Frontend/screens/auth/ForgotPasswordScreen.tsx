@@ -7,7 +7,6 @@ import {
   Image,
   Keyboard,
   TouchableWithoutFeedback,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -54,16 +53,17 @@ export default function ForgotPasswordScreen({ onBackToLogin, onOtpSent }: Forgo
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [emailFocused, setEmailFocused] = useState(false);
 
-  const inputBoxStyle = {
+  const inputBoxStyle = (hasError = false) => ({
     shadowColor: theme.primary,
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
+    shadowOpacity: emailFocused ? 0.2 : 0.08,
+    shadowRadius: emailFocused ? 10 : 6,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    elevation: emailFocused ? 3 : 1,
     borderWidth: 1,
-    borderColor: theme.border,
-  } as const;
+    borderColor: hasError ? '#DC2626' : emailFocused ? theme.primary : theme.border,
+  } as const);
 
   const trimmedEmail = email.trim().toLowerCase();
 
@@ -82,10 +82,10 @@ export default function ForgotPasswordScreen({ onBackToLogin, onOtpSent }: Forgo
     setMessage('');
 
     try {
-      console.log('Forgot password email:', trimmedEmail);
-      console.log('resetPasswordForEmail called');
+      console.log('Forgot password normalized email:', trimmedEmail);
       const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail);
-      console.log('resetPasswordForEmail error:', error?.message);
+      console.log('resetPasswordForEmail result:', error ? `error: ${error.message}` : 'success');
+
       if (error) throw error;
 
       setMessage('If an account exists for this email, we sent a password reset code.');
@@ -124,18 +124,16 @@ export default function ForgotPasswordScreen({ onBackToLogin, onOtpSent }: Forgo
             showsVerticalScrollIndicator={false}>
             <View className="w-full max-w-[360px] items-center">
               <Image source={require('../../assets/Buildspherelogo4x.png')} style={{ width: 56, height: 56 }} resizeMode="contain" />
-              <Text className="mt-5 text-[22px] font-bold" style={{ color: theme.text }}>Forgot Password</Text>
-
-              <View className="mt-2 flex-row items-center">
-                <Text className="text-[12.5px]" style={{ color: theme.textMuted }}>Remember your password? </Text>
-                <TouchableOpacity onPress={onBackToLogin} activeOpacity={0.8}>
-                  <Text className="text-[12.5px] font-semibold text-[#7370FF]">Log In</Text>
-                </TouchableOpacity>
-              </View>
+              <Text className="mt-5 text-center text-[22px] font-bold" style={{ color: theme.text, letterSpacing: 0 }}>
+                Forgot Password
+              </Text>
+              <Text className="mt-2 text-center text-[13px] leading-5" style={{ color: theme.textMuted }}>
+                Enter your email to receive a password reset code.
+              </Text>
 
               <View className="mt-10 w-full">
                 <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Email</Text>
-                <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
+                <View className="rounded-xl" style={[inputBoxStyle(Boolean(errorMessage)), { backgroundColor: theme.input }]}>
                   <TextInput
                     value={email}
                     onChangeText={(value) => {
@@ -149,20 +147,22 @@ export default function ForgotPasswordScreen({ onBackToLogin, onOtpSent }: Forgo
                     autoCorrect={false}
                     keyboardType="email-address"
                     textContentType="emailAddress"
+                    onFocus={() => setEmailFocused(true)}
+                    onBlur={() => setEmailFocused(false)}
                     className="h-[52px] px-4"
                     style={{ color: theme.text }}
                   />
                 </View>
 
-                {message ? (
-                  <Text className="mt-5 text-center text-[13px] leading-5" style={{ color: theme.textSecondary }}>
-                    {message}
+                {errorMessage ? (
+                  <Text className="mt-2 text-[12px] leading-5" style={{ color: '#DC2626' }}>
+                    {errorMessage}
                   </Text>
                 ) : null}
 
-                {errorMessage ? (
-                  <Text className="mt-5 text-center text-[13px] leading-5" style={{ color: '#DC2626' }}>
-                    {errorMessage}
+                {message ? (
+                  <Text className="mt-5 text-center text-[13px] leading-5" style={{ color: theme.textSecondary }}>
+                    {message}
                   </Text>
                 ) : null}
 
@@ -175,11 +175,9 @@ export default function ForgotPasswordScreen({ onBackToLogin, onOtpSent }: Forgo
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  onPress={() => {
-                    Alert.alert('Password reset', 'Enter your email and we will send a password reset code.');
-                  }}
+                  onPress={onBackToLogin}
                   className="mt-6 self-center">
-                  <Text className="text-[12px] font-semibold" style={{ color: theme.textMuted }}>Need help?</Text>
+                  <Text className="text-[12px] font-semibold" style={{ color: theme.textMuted }}>Back to Login</Text>
                 </TouchableOpacity>
               </View>
             </View>

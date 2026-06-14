@@ -6,6 +6,7 @@ const path = require('path');
 const pool = require('../db');
 const { createClient } = require('@supabase/supabase-js');
 const { createNotification, sendPushNotificationToUser } = require('../services/pushNotificationService');
+const { hasQuantityTracking, syncTaskQuantityStatus } = require('../services/taskStatusService');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -52,8 +53,16 @@ function normalizeImageUrl(value) {
   return null;
 }
 
-
 // POST /site-progress  — upload multiple photos + form data
+function firstFiniteInteger(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === '') continue;
+    const number = parseInt(value, 10);
+    if (Number.isFinite(number)) return number;
+  }
+  return 0;
+}
+
 router.post('/', upload.array('photos', 5), async (req, res) => {
   // photoUrls can come from body or req.files
   const {
@@ -94,12 +103,23 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
       }
     }
 
-    const finalPhotoPath = normalizeImageUrl(photoUrls.length > 0 ? photoUrls : req.body.photoUrl);
+    const finalPhotoPath = photoUrls[0] || normalizeImageUrl(req.body.photoUrl);
     const perPhotoCounts = parseJsonBodyField(per_photo_counts, null);
 
-    // 1. Fetch milestone_id from the task
-    const taskRes = await pool.query('SELECT milestone_id FROM tasks WHERE id = $1', [taskId]);
-    const milestoneId = taskRes.rows.length > 0 ? taskRes.rows[0].milestone_id : null;
+    // 1. Fetch milestone data from the task. Quantity milestones drive task status automatically.
+    const taskRes = await pool.query(
+      `SELECT
+         t.milestone_id,
+         pm.has_quantity,
+         pm.target_quantity
+       FROM tasks t
+       LEFT JOIN project_milestones pm ON t.milestone_id = pm.id
+       WHERE t.id = $1`,
+      [taskId]
+    );
+    const taskMilestone = taskRes.rows[0] || {};
+    const milestoneId = taskMilestone.milestone_id || null;
+    const savedQuantity = firstFiniteInteger(verified_panel_count, quantityInstalled, glassCount);
 
     // 2. Insert into task_progress_logs (including AI detection fields)
     const result = await pool.query(
@@ -114,7 +134,7 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
         parseInt(taskId),
         milestoneId,
         parseInt(userId),
-        parseInt(quantityInstalled) || parseInt(glassCount) || 0,
+        savedQuantity,
         finalPhotoPath,
         notes,
         shift || 'Morning',
@@ -130,8 +150,19 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
       ...result.rows[0],
       evidence_image_path: normalizeImageUrl(result.rows[0].evidence_image_path),
     };
+
+    if (milestoneId && hasQuantityTracking(taskMilestone)) {
+      const syncedProgress = await syncTaskQuantityStatus(pool, taskId);
+
+      if (syncedProgress) {
+        progress.current_quantity = syncedProgress.current_quantity;
+        progress.target_quantity = syncedProgress.target_quantity;
+        progress.task_status = syncedProgress.task_status;
+      }
+    }
+
     const notifTitle = 'Task Progress Recorded';
-    const notifMessage = `Progress of ${quantityInstalled || glassCount} units recorded for task #${taskId}.`;
+    const notifMessage = `Progress of ${savedQuantity} units recorded for task #${taskId}.`;
 
     // Notifications should never make a successfully saved progress upload look failed.
     try {
@@ -140,13 +171,16 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
         title: notifTitle,
         message: notifMessage,
         type: 'site_progress_uploaded',
-        referenceType: 'site-progress',
+        referenceType: 'site_progress',
         referenceId: progress.id,
         referenceUrl: `/site-progress/${progress.id}`,
         data: {
           screen: 'SiteProgressDetails',
+          reference_type: 'site_progress',
+          reference_id: String(progress.id),
           project_id: String(projectId),
           site_progress_id: String(progress.id),
+          progress_id: String(progress.id),
           task_id: String(taskId),
         },
         sendPush: false,
@@ -180,9 +214,12 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
           `A new site progress update was uploaded for ${projectName}.`,
           {
             type: 'site_progress_uploaded',
+            reference_type: 'site_progress',
+            reference_id: String(progress.id),
             screen: 'SiteProgressDetails',
             project_id: String(projectId),
             site_progress_id: String(progress.id),
+            progress_id: String(progress.id),
             task_id: String(taskId),
           }
         );
@@ -197,9 +234,12 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
             `AI detected ${count} glass panels. Please verify the count.`,
             {
               type: 'glass_analysis_completed',
+              reference_type: 'site_progress',
+              reference_id: String(progress.id),
               screen: 'SiteProgressDetails',
               project_id: String(projectId),
               site_progress_id: String(progress.id),
+              progress_id: String(progress.id),
               task_id: String(taskId),
             }
           );

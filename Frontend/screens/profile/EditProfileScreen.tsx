@@ -15,6 +15,13 @@ import * as ImagePicker from 'expo-image-picker';
 import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import {
+  calculateAgeFromDateOnly,
+  formatDateOnlyDisplay,
+  normalizeDateOnlyString,
+  parseDateOnly,
+  toDateOnlyString,
+} from '../../utils/dateOnly';
 
 interface EditProfileScreenProps {
   user: UserInfo;
@@ -23,21 +30,6 @@ interface EditProfileScreenProps {
 }
 
 const PRIMARY = '#7370FF';
-
-function parseDateOnly(value?: string | null) {
-  if (!value) return null;
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
-  if (!year || !month || !day) return null;
-  return new Date(year, month - 1, day);
-}
-
-function formatDateOnly(date: Date | null) {
-  if (!date) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 export default function EditProfileScreen({ user, onBack, onSaved }: EditProfileScreenProps) {
   const [firstName, setFirstName] = useState(user.firstName);
@@ -61,7 +53,7 @@ export default function EditProfileScreen({ user, onBack, onSaved }: EditProfile
     suffix !== (user.suffix || '') ||
     phoneNumber !== (user.phoneNumber || '') ||
     gender !== (user.gender || 'Prefer not to say') ||
-    formatDateOnly(birthdate) !== (user.birthdate || '') ||
+    toDateOnlyString(birthdate) !== normalizeDateOnlyString(user.birthdate) ||
     address !== (user.address || '') ||
     department !== (user.department || '') ||
     position !== (user.position || '') ||
@@ -85,18 +77,7 @@ export default function EditProfileScreen({ user, onBack, onSaved }: EditProfile
   };
 
   const displayImageUri = localImageUri || getPhotoUri(user.profilePictureUrl);
-  const age =
-    birthdate
-      ? Math.max(
-          0,
-          new Date().getFullYear() - birthdate.getFullYear() -
-            (new Date().getMonth() < birthdate.getMonth() ||
-            (new Date().getMonth() === birthdate.getMonth() &&
-              new Date().getDate() < birthdate.getDate())
-              ? 1
-              : 0)
-        )
-      : null;
+  const age = calculateAgeFromDateOnly(birthdate);
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -184,7 +165,7 @@ export default function EditProfileScreen({ user, onBack, onSaved }: EditProfile
           suffix,
           phoneNumber,
           gender,
-          birthdate: birthdate ? formatDateOnly(birthdate) : null,
+          birthdate: birthdate ? toDateOnlyString(birthdate) : null,
           address,
           department,
           position,
@@ -318,7 +299,7 @@ export default function EditProfileScreen({ user, onBack, onSaved }: EditProfile
         <Text className="mb-2 mt-4 text-[12px] font-semibold text-[#2D2D2D]">Birthdate (optional)</Text>
         <TouchableOpacity onPress={() => setShowDatePicker(true)} style={[inputStyle, { justifyContent: 'center' }]}>
           <Text className="text-[14px] text-[#1E1E1E]">
-            {birthdate ? birthdate.toLocaleDateString() : 'Select birthdate'}
+            {birthdate ? formatDateOnlyDisplay(birthdate) : 'Select birthdate'}
           </Text>
         </TouchableOpacity>
         <Text className="mb-1 text-[12px] text-[#7A7A7A]">Age: {age !== null ? age : 'N/A'}</Text>

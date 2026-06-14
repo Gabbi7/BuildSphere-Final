@@ -10,6 +10,7 @@ import {
   Animated,
   Alert,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +21,7 @@ import { normalizeImageUrl } from '../../lib/imageUrls';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
+import { centeredContent } from '../../utils/responsive';
 
 
 interface TaskDetailScreenProps {
@@ -47,6 +49,14 @@ interface Comment {
 
 const PRIMARY = '#7370FF';
 
+const truthyFlag = (value: any) =>
+  value === true || value === 1 || ['true', '1', 'yes'].includes(String(value || '').toLowerCase());
+
+const finiteNumber = (value: any, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
 export default function TaskDetailScreen({
   visible,
   task,
@@ -61,6 +71,8 @@ export default function TaskDetailScreen({
 }: TaskDetailScreenProps) {
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const screenContentStyle = centeredContent(width);
   const [history, setHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -101,6 +113,14 @@ export default function TaskDetailScreen({
 
   if (!task) return null;
   const perms = getPermissions(userRole);
+  const hasQuantityTracking = truthyFlag(task.milestone_has_quantity ?? task.has_quantity);
+  const quantityCurrent = finiteNumber(task.milestone_current_quantity ?? task.current_quantity);
+  const quantityTarget = finiteNumber(task.milestone_target_quantity ?? task.target_quantity);
+  const quantityUnit = task.milestone_unit_of_measure || task.unit_of_measure || 'units';
+  const quantityPercent =
+    hasQuantityTracking && quantityTarget > 0
+      ? Math.min(100, Math.max(0, Math.round((quantityCurrent / quantityTarget) * 100)))
+      : 0;
 
 
   const getStatusStyle = (status: string) => {
@@ -175,8 +195,8 @@ export default function TaskDetailScreen({
       <View className="flex-1" style={{ backgroundColor: theme.background }}>
         {/* Header */}
         <View
-          className="flex-row items-center px-5 pb-4"
-          style={{ paddingTop: Math.max(insets.top + 12, 56) }}>
+          className="flex-row items-center pb-4"
+          style={[screenContentStyle, { paddingTop: Math.max(insets.top + 12, 56) }]}>
           <TouchableOpacity onPress={onClose} className="mr-3 -ml-2">
             <Ionicons name="caret-back-outline" size={24} color={theme.text} />
           </TouchableOpacity>
@@ -186,17 +206,27 @@ export default function TaskDetailScreen({
         </View>
 
         <ScrollView
-          className="flex-1 px-5"
+          className="flex-1"
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 120 }}>
+          <View style={screenContentStyle}>
           {/* Status & Title Card */}
           <View
             className="mb-8 rounded-[24px] border p-6"
             style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.04, shadowRadius: 10, elevation: 2 }}>
             <View className="mb-4 flex-row items-center justify-between">
-              <Text className="mr-4 flex-1 text-[20px] font-bold" style={{ color: theme.text }}>{task.title}</Text>
+              <Text className="mr-4 flex-1 text-[20px] font-bold" style={{ color: theme.text }} numberOfLines={3}>{task.title}</Text>
               <TouchableOpacity
-                onPress={() => setShowStatusModal(true)}
+                onPress={() => {
+                  if (hasQuantityTracking) {
+                    Alert.alert(
+                      'Automatic status',
+                      'This task uses quantity tracking, so its status changes automatically as progress is recorded.'
+                    );
+                    return;
+                  }
+                  setShowStatusModal(true);
+                }}
                 className="rounded-full px-5 py-2 flex-row items-center"
                 style={{ backgroundColor: getStatusStyle(currentStatus).bg }}>
                 <Text
@@ -204,13 +234,39 @@ export default function TaskDetailScreen({
                   style={{ color: getStatusStyle(currentStatus).text }}>
                   {getStatusStyle(currentStatus).label}
                 </Text>
-                <Ionicons name="chevron-down" size={12} color={getStatusStyle(currentStatus).text} style={{ marginLeft: 6 }} />
+                <Ionicons
+                  name={hasQuantityTracking ? 'lock-closed-outline' : 'chevron-down'}
+                  size={12}
+                  color={getStatusStyle(currentStatus).text}
+                  style={{ marginLeft: 6 }}
+                />
               </TouchableOpacity>
             </View>
             <Text className="text-[14px] leading-6" style={{ color: theme.textMuted }}>
               {task.description ||
                 'The task involves technical drawings and layouts required for the initial construction phase. Please ensure all details are accurate and adhere to project standards.'}
             </Text>
+            {hasQuantityTracking && (
+              <View className="mt-4 rounded-xl border px-4 py-3" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
+                <View className="flex-row items-center justify-between">
+                  <Text className="text-[11px] font-semibold uppercase" style={{ color: theme.textMuted }}>Quantity Progress</Text>
+                  {quantityTarget > 0 && (
+                    <Text className="text-[11px] font-bold" style={{ color: theme.primary }}>{quantityPercent}%</Text>
+                  )}
+                </View>
+                <Text className="mt-1 text-[14px] font-bold" style={{ color: theme.text }}>
+                  Installed: {quantityCurrent}{quantityTarget > 0 ? ` / ${quantityTarget}` : ''} {quantityUnit}
+                </Text>
+                {quantityTarget > 0 && (
+                  <View className="mt-3 h-2 overflow-hidden rounded-full" style={{ backgroundColor: theme.border }}>
+                    <View
+                      className="h-2 rounded-full"
+                      style={{ width: `${quantityPercent}%`, backgroundColor: theme.primary }}
+                    />
+                  </View>
+                )}
+              </View>
+            )}
           </View>
 
           {/* Metadata Grid */}
@@ -371,7 +427,8 @@ export default function TaskDetailScreen({
                               <Text
                                 className="ml-1 flex-1 text-[11px] font-medium"
                                 style={{ color: theme.textMuted }}
-                                numberOfLines={2}>
+                                numberOfLines={2}
+                                ellipsizeMode="tail">
                                 {formatProgressTimestamp(item.created_at)}
                               </Text>
                             </View>
@@ -469,6 +526,7 @@ export default function TaskDetailScreen({
                 </View>
               ))
             )}
+          </View>
           </View>
         </ScrollView>
 
@@ -595,7 +653,7 @@ export default function TaskDetailScreen({
           activeOpacity={1}
           onPress={() => setShowActionMenu(false)}
           className="flex-1 justify-end bg-black/40">
-          <View className="rounded-t-[30px] p-6 pb-12" style={{ backgroundColor: theme.elevated }}>
+          <View className="rounded-t-[30px] p-6 pb-12" style={[{ backgroundColor: theme.elevated }, screenContentStyle]}>
             <View className="h-1 w-10 self-center rounded-full mb-6" style={{ backgroundColor: theme.border }} />
             <Text className="text-center text-[16px] font-bold mb-6" style={{ color: theme.text }}>Log Options</Text>
 
@@ -634,7 +692,7 @@ export default function TaskDetailScreen({
           activeOpacity={1}
           onPress={() => setShowShiftModal(false)}
           className="flex-1 justify-end bg-black/40">
-          <View className="rounded-t-[30px] p-6 pb-12" style={{ backgroundColor: theme.elevated }}>
+          <View className="rounded-t-[30px] p-6 pb-12" style={[{ backgroundColor: theme.elevated }, screenContentStyle]}>
             <View className="h-1 w-10 self-center rounded-full mb-6" style={{ backgroundColor: theme.border }} />
             <Text className="text-center text-[18px] font-bold mb-6" style={{ color: theme.text }}>Select Shift</Text>
 
@@ -683,12 +741,13 @@ export default function TaskDetailScreen({
       </Modal>
 
       {/* Status Selection Modal */}
+      {!hasQuantityTracking && (
       <Modal visible={showStatusModal} transparent={true} animationType="slide">
         <TouchableOpacity
           activeOpacity={1}
           onPress={() => setShowStatusModal(false)}
           className="flex-1 justify-end bg-black/40">
-          <View className="rounded-t-[30px] p-6 pb-12" style={{ backgroundColor: theme.elevated }}>
+          <View className="rounded-t-[30px] p-6 pb-12" style={[{ backgroundColor: theme.elevated }, screenContentStyle]}>
             <View className="h-1 w-10 self-center rounded-full mb-6" style={{ backgroundColor: theme.border }} />
             <Text className="text-center text-[18px] font-bold mb-6" style={{ color: theme.text }}>Update Status</Text>
 
@@ -742,6 +801,7 @@ export default function TaskDetailScreen({
           </View>
         </TouchableOpacity>
       </Modal>
+      )}
 
     </Modal>
   );

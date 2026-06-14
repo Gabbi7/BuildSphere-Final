@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Image, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Image, Alert, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { UserInfo } from '../../App';
 import EditInformationScreen from './EditInformationScreen';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ProfileSkeleton } from '../../components/skeletons';
+import { calculateAgeFromDateOnly, formatDateOnlyDisplay } from '../../utils/dateOnly';
+import { centeredContent } from '../../utils/responsive';
 
 interface MoreScreenProps {
   user: UserInfo;
@@ -13,18 +15,13 @@ interface MoreScreenProps {
   onUserUpdated: (updated: UserInfo) => void;
 }
 
-function parseDateOnly(value?: string | null) {
-  if (!value) return null;
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
-  if (!year || !month || !day) return null;
-  return new Date(year, month - 1, day);
-}
-
 export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreenProps) {
   const [screen, setScreen] = useState<'more' | 'editInfo'>('more');
   const [profile, setProfile] = useState<UserInfo>(user);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const { theme, mode, setMode } = useAppTheme();
+  const { width } = useWindowDimensions();
+  const screenContentStyle = centeredContent(width);
 
   useEffect(() => {
     setProfile(user);
@@ -61,19 +58,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
     : null;
 
   const fullName = [firstName, middleName, lastName, suffix].filter(Boolean).join(' ');
-  const birthdateDate = parseDateOnly(profile.birthdate);
-  const age =
-    birthdateDate
-      ? Math.max(
-          0,
-          new Date().getFullYear() - birthdateDate.getFullYear() -
-            (new Date().getMonth() < birthdateDate.getMonth() ||
-            (new Date().getMonth() === birthdateDate.getMonth() &&
-              new Date().getDate() < birthdateDate.getDate())
-              ? 1
-              : 0)
-        )
-      : null;
+  const age = calculateAgeFromDateOnly(profile.birthdate);
 
   if (screen === 'editInfo') {
     return (
@@ -91,7 +76,8 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
-      <ScrollView className="flex-1 px-6 pt-14" contentContainerStyle={{ paddingBottom: 150 }}>
+      <ScrollView className="flex-1 pt-14" contentContainerStyle={{ paddingBottom: 150 }}>
+        <View style={screenContentStyle}>
         {loadingProfile ? (
           <ProfileSkeleton />
         ) : (
@@ -126,7 +112,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
           )}
 
           <Text className="mt-4 text-[20px] font-bold" style={{ color: theme.text }}>{fullName || 'Unnamed User'}</Text>
-          <Text className="mt-1 text-[13px]" style={{ color: theme.textMuted }}>{profile.email}</Text>
+          <Text className="mt-1 text-center text-[13px]" style={{ color: theme.textMuted }} numberOfLines={2}>{profile.email}</Text>
           <Text className="mt-1 text-[12px] uppercase" style={{ color: theme.textSecondary }}>{profile.role || 'staff'}</Text>
         </View>
 
@@ -156,7 +142,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
           <View className="flex-row flex-wrap">
             {[
               { icon: 'call-outline', label: 'Phone', value: profile.phoneNumber, color: '#4dabf7' },
-              { icon: 'calendar-outline', label: 'Birthdate', value: birthdateDate ? birthdateDate.toLocaleDateString() : null, color: '#ff922b' },
+              { icon: 'calendar-outline', label: 'Birthdate', value: formatDateOnlyDisplay(profile.birthdate), color: '#ff922b' },
               { icon: 'hourglass-outline', label: 'Age', value: age, color: '#51cf66' },
               { icon: 'business-outline', label: 'Dept', value: profile.department, color: '#7370FF' },
               { icon: 'briefcase-outline', label: 'Position', value: profile.position, color: '#f06595' },
@@ -169,7 +155,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
                   </View>
                   <Text className="text-[11px] font-medium" style={{ color: theme.textMuted }}>{item.label}</Text>
                 </View>
-                <Text className="ml-10 text-[13px] font-bold" style={{ color: theme.textSecondary }} numberOfLines={1}>
+                <Text className="ml-10 text-[13px] font-bold" style={{ color: theme.textSecondary }} numberOfLines={2}>
                   {item.value || 'Not set'}
                 </Text>
               </View>
@@ -182,7 +168,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
             </View>
             <View>
               <Text className="text-[10px] font-bold uppercase tracking-wider" style={{ color: theme.textMuted }}>Official Email</Text>
-              <Text className="text-[14px] font-semibold" style={{ color: theme.text }}>{profile.email}</Text>
+              <Text className="text-[14px] font-semibold" style={{ color: theme.text }} numberOfLines={2}>{profile.email}</Text>
             </View>
           </View>
         </View>
@@ -227,6 +213,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
             </View>
             <Text className="text-[15px] font-medium text-[#FF6B6B]">Logout</Text>
           </TouchableOpacity>
+        </View>
         </View>
       </ScrollView>
     </View>

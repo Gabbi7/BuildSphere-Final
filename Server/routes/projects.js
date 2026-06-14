@@ -177,6 +177,8 @@ router.put('/:id', async (req, res) => {
           : `Project status changed to ${updatedProject.status}.`,
         {
           type: isDelayWarning ? 'project_delay_warning' : 'milestone_updated',
+          reference_type: 'project',
+          reference_id: String(updatedProject.id),
           screen: 'ProjectDetails',
           project_id: String(updatedProject.id),
           status: updatedProject.status,

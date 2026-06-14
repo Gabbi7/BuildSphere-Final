@@ -46,6 +46,8 @@ async function ensureNotificationTables() {
       title TEXT NOT NULL,
       body TEXT NOT NULL,
       type TEXT,
+      reference_type TEXT,
+      reference_id TEXT,
       data JSONB,
       is_read BOOLEAN DEFAULT FALSE,
       date TEXT,
@@ -61,6 +63,8 @@ async function ensureNotificationTables() {
       ADD COLUMN IF NOT EXISTS message TEXT,
       ADD COLUMN IF NOT EXISTS body TEXT,
       ADD COLUMN IF NOT EXISTS type TEXT,
+      ADD COLUMN IF NOT EXISTS reference_type TEXT,
+      ADD COLUMN IF NOT EXISTS reference_id TEXT,
       ADD COLUMN IF NOT EXISTS data JSONB,
       ADD COLUMN IF NOT EXISTS reference_url TEXT,
       ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE,
@@ -208,12 +212,14 @@ async function createNotification({
     reference_id: referenceId || data.reference_id || undefined,
   };
   const finalReferenceUrl = referenceUrl || buildReferenceUrl(payload);
+  const finalReferenceType = payload.reference_type || referenceType || null;
+  const finalReferenceId = payload.reference_id || referenceId || null;
 
   const result = await pool.query(
-    `INSERT INTO notifications (user_id, title, message, body, type, data, is_read, date, time, reference_url, created_at, updated_at)
-     VALUES ($1, $2, $3, $3, $4, $5, false, $6, $7, $8, NOW(), NOW())
+    `INSERT INTO notifications (user_id, title, message, body, type, reference_type, reference_id, data, is_read, date, time, reference_url, created_at, updated_at)
+     VALUES ($1, $2, $3, $3, $4, $5, $6, $7, false, $8, $9, $10, NOW(), NOW())
      RETURNING *`,
-    [recipientId, title, message, type || null, payload, date, time, finalReferenceUrl]
+    [recipientId, title, message, type || null, finalReferenceType, finalReferenceId, payload, date, time, finalReferenceUrl]
   );
   const notification = result.rows[0];
 
@@ -222,7 +228,10 @@ async function createNotification({
     push = await sendExpoPushToUser(recipientId, title, message, {
       ...payload,
       notification_id: String(notification.id),
+      reference_type: finalReferenceType,
+      reference_id: finalReferenceId,
       reference_url: finalReferenceUrl,
+      data: payload,
     });
   }
 

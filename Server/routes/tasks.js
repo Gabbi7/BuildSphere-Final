@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const pool = require('../db');
 const { sendPushNotificationToUser } = require('../services/pushNotificationService');
+const { calculateTaskStatus, hasQuantityTracking } = require('../services/taskStatusService');
 
 const TASK_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent']);
 const TASK_STATUSES = new Set(['todo', 'pending', 'in_progress', 'in-progress', 'in_review', 'in-review', 'completed']);
@@ -84,12 +85,19 @@ function normalizeDateForInput(value) {
 }
 
 function formatTask(row) {
+  const milestoneHasQuantity = hasQuantityTracking(row);
+  const calculatedStatus = calculateTaskStatus(row);
+
   return {
     ...row,
     project: row.project || row.project_name || null,
     phase: row.phase || row.phase_name || null,
     milestone: row.milestone || row.milestone_name || null,
-    status: mobileStatus(row.status),
+    status: mobileStatus(calculatedStatus || row.status),
+    milestone_has_quantity: milestoneHasQuantity,
+    milestone_target_quantity: row.milestone_target_quantity ?? row.target_quantity ?? null,
+    milestone_current_quantity: row.milestone_current_quantity ?? row.current_quantity ?? null,
+    milestone_unit_of_measure: row.milestone_unit_of_measure ?? row.unit_of_measure ?? null,
     start_date: normalizeDateForInput(row.start_date),
     due_date: normalizeDateForInput(row.due_date),
   };
@@ -148,6 +156,10 @@ router.get('/', async (req, res) => {
          p.project_name as project,
          pp.phase_key as phase,
          pm.milestone_name as milestone,
+         pm.has_quantity as milestone_has_quantity,
+         pm.target_quantity as milestone_target_quantity,
+         pm.current_quantity as milestone_current_quantity,
+         pm.unit_of_measure as milestone_unit_of_measure,
          u.first_name || ' ' || u.last_name as assigned_to_name
        FROM "public"."tasks" t
        LEFT JOIN "public"."projects" p ON t.project_id = p.id
@@ -243,6 +255,10 @@ router.get('/project/:projectId', async (req, res) => {
          p.project_name as project,
          pp.phase_key as phase,
          pm.milestone_name as milestone,
+         pm.has_quantity as milestone_has_quantity,
+         pm.target_quantity as milestone_target_quantity,
+         pm.current_quantity as milestone_current_quantity,
+         pm.unit_of_measure as milestone_unit_of_measure,
          u.first_name || ' ' || u.last_name as assigned_to_name
        FROM tasks t
        LEFT JOIN projects p ON t.project_id = p.id
@@ -296,11 +312,15 @@ router.post(
       return res.status(400).json({ error: 'Invalid task status.' });
     }
 
+    let selectedMilestone = null;
     if (values.phaseId && values.milestoneId) {
       const relationCheck = await pool.query(
         `SELECT
            pp.id as phase_id,
-           pm.id as milestone_id
+           pm.id as milestone_id,
+           pm.has_quantity,
+           pm.target_quantity,
+           pm.current_quantity
          FROM project_phases pp
          JOIN project_milestones pm ON pm.project_phase_id = pp.id
          WHERE pp.id = $1
@@ -318,7 +338,17 @@ router.post(
           },
         });
       }
+      selectedMilestone = relationCheck.rows[0];
     }
+
+    const initialStatus = hasQuantityTracking(selectedMilestone)
+      ? calculateTaskStatus({
+          has_quantity: true,
+          current_quantity: selectedMilestone.current_quantity,
+          target_quantity: selectedMilestone.target_quantity,
+          status: normalizedStatus,
+        })
+      : normalizedStatus;
 
     const result = await pool.query(
       `INSERT INTO tasks (
@@ -337,7 +367,7 @@ router.post(
         actorId || null,
         values.assigneeId,
         values.priority,
-        normalizedStatus,
+        initialStatus,
         values.startDate,
         values.dueDate,
         actorId || null,
@@ -375,6 +405,8 @@ router.post(
         `You have been assigned a new task: '${values.title}' for ${projectName}.`,
         {
           type: 'task_assigned',
+          reference_type: 'task',
+          reference_id: String(task.id),
           screen: 'TaskDetails',
           task_id: String(task.id),
           project_id: String(values.projectId),
@@ -390,6 +422,10 @@ router.post(
          p.project_name as project,
          pp.phase_key as phase,
          pm.milestone_name as milestone,
+         pm.has_quantity as milestone_has_quantity,
+         pm.target_quantity as milestone_target_quantity,
+         pm.current_quantity as milestone_current_quantity,
+         pm.unit_of_measure as milestone_unit_of_measure,
          u.first_name || ' ' || u.last_name as assigned_to_name
        FROM tasks t
        LEFT JOIN projects p ON t.project_id = p.id
@@ -438,10 +474,26 @@ router.patch('/:id', async (req, res) => {
   
   try {
     const currentTaskResult = await pool.query(
-      'SELECT id, title, status, assigned_to, project_id, updated_by FROM "public"."tasks" WHERE id = $1',
+      `SELECT
+         t.id,
+         t.title,
+         t.status,
+         t.assigned_to,
+         t.project_id,
+         t.updated_by,
+         pm.has_quantity as milestone_has_quantity
+       FROM "public"."tasks" t
+       LEFT JOIN project_milestones pm ON t.milestone_id = pm.id
+       WHERE t.id = $1`,
       [id]
     );
     const currentTask = currentTaskResult.rows[0];
+
+    if (updates.status && hasQuantityTracking(currentTask)) {
+      return res.status(400).json({
+        error: 'Quantity-based tasks update status automatically from progress.',
+      });
+    }
 
     const result = await pool.query(
       `UPDATE "public"."tasks" SET ${setClause}, updated_at = NOW() WHERE id = $${keys.length + 1} RETURNING *`,
@@ -471,6 +523,8 @@ router.patch('/:id', async (req, res) => {
         `Task "${currentTask.title}" is now ${updates.status}.`,
         {
           type: 'task_updated',
+          reference_type: 'task',
+          reference_id: String(updatedTask.id),
           screen: 'TaskDetails',
           task_id: String(updatedTask.id),
           project_id: String(updatedTask.project_id || currentTask.project_id || ''),
@@ -479,7 +533,27 @@ router.patch('/:id', async (req, res) => {
       );
     }
 
-    res.json(result.rows[0]);
+    const formattedTaskResult = await pool.query(
+      `SELECT
+         t.*,
+         p.project_name as project,
+         pp.phase_key as phase,
+         pm.milestone_name as milestone,
+         pm.has_quantity as milestone_has_quantity,
+         pm.target_quantity as milestone_target_quantity,
+         pm.current_quantity as milestone_current_quantity,
+         pm.unit_of_measure as milestone_unit_of_measure,
+         u.first_name || ' ' || u.last_name as assigned_to_name
+       FROM tasks t
+       LEFT JOIN projects p ON t.project_id = p.id
+       LEFT JOIN project_phases pp ON t.phase_id = pp.id
+       LEFT JOIN project_milestones pm ON t.milestone_id = pm.id
+       LEFT JOIN users u ON t.assigned_to = u.id
+       WHERE t.id = $1`,
+      [updatedTask.id]
+    );
+
+    res.json(formatTask(formattedTaskResult.rows[0] || updatedTask));
   } catch (err) {
     console.error('DATABASE UPDATE ERROR:', err.message);
     res.status(500).json({ error: 'Failed to update task: ' + err.message });

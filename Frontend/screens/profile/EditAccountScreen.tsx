@@ -25,6 +25,8 @@ export default function EditAccountScreen({ user, onBack, onSaved }: EditAccount
   const [email, setEmail] = useState(user.email);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const hasChanges = email !== user.email || !!password || !!confirmPassword;
 
@@ -122,24 +124,42 @@ export default function EditAccountScreen({ user, onBack, onSaved }: EditAccount
           New Password{' '}
           <Text className="font-normal text-[#B9B9B9]">(leave blank to keep current)</Text>
         </Text>
-        <TextInput
-          value={password}
-          onChangeText={setPassword}
-          style={inputStyle}
-          placeholder="Password"
-          placeholderTextColor="#B9B9B9"
-          secureTextEntry
-        />
+        <View className="mb-3 flex-row items-center rounded-xl border bg-white" style={{ borderColor: '#E7E7EE' }}>
+          <TextInput
+            value={password}
+            onChangeText={setPassword}
+            style={[inputStyle, { flex: 1, marginBottom: 0, borderWidth: 0, paddingRight: 8 }]}
+            placeholder="Password"
+            placeholderTextColor="#B9B9B9"
+            secureTextEntry={!showPassword}
+          />
+          <TouchableOpacity
+            onPress={() => setShowPassword((current) => !current)}
+            className="h-[52px] w-[52px] items-center justify-center"
+            accessibilityRole="button"
+            accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}>
+            <Ionicons name={showPassword ? 'eye-outline' : 'eye-off-outline'} size={22} color="#7A7A7A" />
+          </TouchableOpacity>
+        </View>
 
         <Text className="mb-2 mt-3 text-[12px] font-semibold text-[#2D2D2D]">Confirm Password</Text>
-        <TextInput
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-          style={inputStyle}
-          placeholder="Confirm Password"
-          placeholderTextColor="#B9B9B9"
-          secureTextEntry
-        />
+        <View className="mb-3 flex-row items-center rounded-xl border bg-white" style={{ borderColor: '#E7E7EE' }}>
+          <TextInput
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            style={[inputStyle, { flex: 1, marginBottom: 0, borderWidth: 0, paddingRight: 8 }]}
+            placeholder="Confirm Password"
+            placeholderTextColor="#B9B9B9"
+            secureTextEntry={!showConfirmPassword}
+          />
+          <TouchableOpacity
+            onPress={() => setShowConfirmPassword((current) => !current)}
+            className="h-[52px] w-[52px] items-center justify-center"
+            accessibilityRole="button"
+            accessibilityLabel={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}>
+            <Ionicons name={showConfirmPassword ? 'eye-outline' : 'eye-off-outline'} size={22} color="#7A7A7A" />
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </View>
   );

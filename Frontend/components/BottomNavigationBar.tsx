@@ -1,9 +1,10 @@
 import React from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { floatingNavShadow } from '../constants/theme';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { centeredWidth, NAV_CONTENT_MAX_WIDTH } from '../utils/responsive';
 
 export type MainTab = 'home' | 'mywork' | 'notifications' | 'more';
 
@@ -33,13 +34,17 @@ export default function BottomNavigationBar({
 }: BottomNavigationBarProps) {
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const visibleItems = NAV_ITEMS.filter((item) => canViewHome || item.key !== 'home');
+  const navWidth = centeredWidth(width, NAV_CONTENT_MAX_WIDTH);
 
   return (
     <View
-      className="absolute left-5 right-5 h-[70px] flex-row items-center justify-between rounded-[30px] px-6"
+      className="absolute h-[70px] flex-row items-center justify-between rounded-[30px] px-4"
       style={{
+        left: Math.max((width - navWidth) / 2, 16),
         bottom: Math.max(insets.bottom + 4, 22),
+        width: navWidth,
         backgroundColor: theme.tabBar,
         ...floatingNavShadow,
       }}>
@@ -48,7 +53,7 @@ export default function BottomNavigationBar({
         return (
           <TouchableOpacity
             key={item.key}
-            className="items-center rounded-full p-2 px-3"
+            className="min-w-[58px] items-center rounded-full px-2 py-2"
             style={{ backgroundColor: isActive ? theme.primaryLight : 'transparent' }}
             onPress={() => onTabPress(item.key)}
             activeOpacity={0.8}>
@@ -68,6 +73,8 @@ export default function BottomNavigationBar({
             </View>
             <Text
               className={`mt-1 text-[10px] ${isActive ? 'font-bold' : ''}`}
+              numberOfLines={1}
+              adjustsFontSizeToFit
               style={{ color: isActive ? theme.primary : theme.textMuted }}>
               {item.label}
             </Text>

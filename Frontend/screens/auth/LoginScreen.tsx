@@ -49,7 +49,9 @@ export default function LoginScreen({
     }
     setLoading(true);
     try {
-      const trimmedEmail = email.trim();
+      const trimmedEmail = email.trim().toLowerCase();
+      console.log('Login method: Supabase Auth signInWithPassword');
+      console.log('Login normalized email:', trimmedEmail);
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: trimmedEmail,
         password,
@@ -159,7 +161,7 @@ export default function LoginScreen({
                 accessibilityRole="button"
                 accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}>
                 <Ionicons
-                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  name={showPassword ? 'eye-outline' : 'eye-off-outline'}
                   size={22}
                   color={theme.textMuted}
                 />

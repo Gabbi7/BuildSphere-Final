@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -18,6 +19,9 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { formatDateOnlyDisplay, normalizeDateOnlyString, parseDateOnly, toDateOnlyString } from '../../utils/dateOnly';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
 
 interface EditInformationScreenProps {
   user: UserInfo;
@@ -27,23 +31,11 @@ interface EditInformationScreenProps {
 
 const PRIMARY = '#7370FF';
 
-function parseDateOnly(value?: string | null) {
-  if (!value) return null;
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
-  if (!year || !month || !day) return null;
-  return new Date(year, month - 1, day);
-}
-
-function formatDateOnly(date: Date | null) {
-  if (!date) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 export default function EditInformationScreen({ user, onBack, onSaved }: EditInformationScreenProps) {
   const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const formContentStyle = centeredContent(width, FORM_CONTENT_MAX_WIDTH);
 
   // Profile State
   const [firstName, setFirstName] = useState(user.firstName || '');
@@ -71,7 +63,7 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
     suffix !== (user.suffix || '') ||
     phoneNumber !== (user.phoneNumber || '') ||
     gender !== (user.gender || 'Prefer not to say') ||
-    formatDateOnly(birthdate) !== (user.birthdate || '') ||
+    toDateOnlyString(birthdate) !== normalizeDateOnlyString(user.birthdate) ||
     address !== (user.address || '') ||
     department !== (user.department || '') ||
     position !== (user.position || '') ||
@@ -151,7 +143,7 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
         body: JSON.stringify({
           firstName, middleName, lastName, suffix,
           phoneNumber, gender, address, department, position,
-          birthdate: birthdate ? formatDateOnly(birthdate) : null,
+          birthdate: birthdate ? toDateOnlyString(birthdate) : null,
           profilePictureUrl: newPhotoUrl,
         }),
       });
@@ -192,7 +184,7 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
       {/* Header */}
-      <View className="relative flex-row items-center justify-between px-5 pb-3 pt-8 border-b" style={{ borderColor: theme.border, backgroundColor: theme.background }}>
+      <View className="relative flex-row items-center justify-between pb-3 border-b" style={[formContentStyle, { paddingTop: Math.max(insets.top + 10, 44), borderColor: theme.border, backgroundColor: theme.background }]}>
         <TouchableOpacity onPress={handleBackPress} className="z-10 -ml-2 -mt-1">
           <Ionicons name="caret-back-outline" size={24} color={theme.text} />
         </TouchableOpacity>
@@ -219,7 +211,8 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
       >
 
 
-        <ScrollView className="flex-1 px-6 pt-4" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+        <ScrollView className="flex-1 pt-4" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+          <View style={formContentStyle}>
             <View>
               {/* Photo Section */}
               <View className="mb-4 mt-2 items-center">
@@ -269,7 +262,7 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
                   style={[inputStyle, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 }]}
                 >
                   <Text className="text-[15px]" style={{ color: theme.text }}>
-                    {birthdate ? birthdate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Select birthdate'}
+                    {birthdate ? formatDateOnlyDisplay(birthdate) : 'Select birthdate'}
                   </Text>
                   <Ionicons name="calendar-outline" size={20} color={PRIMARY} />
                 </TouchableOpacity>
@@ -314,7 +307,7 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
                   className="flex-1 items-center justify-center px-6"
                   style={{ backgroundColor: theme.overlay }}
                 >
-                  <View className="w-full rounded-[28px] p-6 overflow-hidden" style={{ backgroundColor: theme.elevated }}>
+          <View className="w-full rounded-[28px] p-6 overflow-hidden" style={{ backgroundColor: theme.elevated, maxWidth: 560 }}>
                     <View className="flex-row items-center justify-between mb-4 pb-4 border-b" style={{ borderColor: theme.border }}>
                       <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Select Birthdate</Text>
                       <TouchableOpacity onPress={() => setShowDatePicker(false)}>
@@ -336,6 +329,7 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
                 </TouchableOpacity>
               </Modal>
             </View>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>

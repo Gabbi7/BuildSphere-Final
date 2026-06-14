@@ -5,7 +5,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -15,8 +15,7 @@ import { type UserRole } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { MainTab } from '../../components/BottomNavigationBar';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
-
-const { width } = Dimensions.get('window');
+import { centeredContent } from '../../utils/responsive';
 
 interface Project {
   id: number;
@@ -46,10 +45,13 @@ const PRIMARY = '#7370FF';
 
 function ProjectDetailSkeleton({ onBack }: { onBack: () => void }) {
   const { theme } = useAppTheme();
+  const { width } = useWindowDimensions();
+  const screenContentStyle = centeredContent(width);
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
-      <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 120 }}>
+        <View style={screenContentStyle}>
         <View className="flex-row items-center px-5 pb-4 pt-12">
           <TouchableOpacity onPress={onBack} className="mr-3 -ml-2 -mt-1">
             <Ionicons name="caret-back-outline" size={24} color={theme.text} />
@@ -104,6 +106,7 @@ function ProjectDetailSkeleton({ onBack }: { onBack: () => void }) {
             </SkeletonCard>
           ))}
         </View>
+        </View>
       </ScrollView>
     </View>
   );
@@ -152,6 +155,8 @@ export default function ProjectDetailScreen({
   onViewInventory,
 }: Props) {
   const { theme } = useAppTheme();
+  const { width } = useWindowDimensions();
+  const screenContentStyle = centeredContent(width);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -199,14 +204,15 @@ export default function ProjectDetailScreen({
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <ScrollView
-        className="flex-1 px-5"
+        className="flex-1"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}>
+        <View style={screenContentStyle}>
         <View className="flex-row items-center px-5 pb-4 pt-12">
           <TouchableOpacity onPress={onBack} className="mr-3 -ml-2 -mt-1">
             <Ionicons name="caret-back-outline" size={24} color={theme.text} />
           </TouchableOpacity>
-          <Text className="flex-1 text-[24px] font-bold" style={{ color: theme.primary }}>{project.name}</Text>
+          <Text className="flex-1 text-[24px] font-bold" style={{ color: theme.primary }} numberOfLines={2}>{project.name}</Text>
         </View>
 
         {/* Main Info Card */}
@@ -214,7 +220,7 @@ export default function ProjectDetailScreen({
           className="mb-5 rounded-[24px] border p-6"
           style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.06, shadowRadius: 15, elevation: 3 }}>
           <View className="mb-3 flex-row items-center justify-between">
-            <Text className="flex-1 text-[20px] font-bold" style={{ color: theme.text }}>{project.name}</Text>
+            <Text className="mr-3 flex-1 text-[20px] font-bold" style={{ color: theme.text }} numberOfLines={2}>{project.name}</Text>
             <View className="rounded-full px-5 py-2" style={{ backgroundColor: badge.bg }}>
               <Text className="text-[11px] font-bold uppercase tracking-wider text-white">
                 {badge.label}
@@ -304,6 +310,7 @@ export default function ProjectDetailScreen({
               <Ionicons name="chevron-forward" size={24} color={theme.textMuted} />
             </TouchableOpacity>
           ))}
+        </View>
         </View>
       </ScrollView>
 

@@ -1,28 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, RefreshControl, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, RefreshControl, Alert, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
-import { LEGACY_NOTIFICATION_TYPE_MAP } from '../../constants/constants';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { NotificationSkeleton, SkeletonText } from '../../components/skeletons';
-
-interface NotificationMetadata {
-  task_id?: number | string;
-  taskId?: number | string;
-  project_id?: number | string;
-  projectId?: number | string;
-  item_id?: number | string;
-  inventory_item_id?: number | string;
-  inventoryItemId?: number | string;
-  site_progress_id?: number | string;
-  siteProgressId?: number | string;
-  comment_id?: number | string;
-  commentId?: number | string;
-  screen?: string;
-  type?: string;
-  [key: string]: unknown;
-}
+import {
+  buildNotificationRoute,
+  handleNotificationNavigation,
+  normalizeNotificationType,
+  type NotificationMetadata,
+} from '../../utils/notificationNavigation';
+import { centeredContent } from '../../utils/responsive';
 
 interface Notification {
   id: number;
@@ -46,128 +35,6 @@ interface NotificationsProps {
   onUnreadCountChange?: (count: number) => void;
 }
 
-type NotificationRoute =
-  | { kind: 'inventory'; projectId?: number; inventoryItemId?: number }
-  | { kind: 'task'; taskId?: number }
-  | { kind: 'project'; projectId?: number }
-  | { kind: 'site-progress'; projectId?: number; taskId?: number; siteProgressId?: number }
-  | { kind: 'comment'; taskId?: number; projectId?: number; siteProgressId?: number; commentId?: number }
-  | { kind: 'unknown' };
-
-const TYPE_GROUPS = {
-  inventory: ['WARNING', 'LOW_STOCK', 'CRITICAL_STOCK', 'INVENTORY_LOW_STOCK'],
-  task: ['TASK_ASSIGNED', 'TASK_UPDATED', 'TASK_PROGRESS', 'PROGRESS_RECORDED', 'TASK_PROGRESS_RECORDED', 'TASK_READY_FOR_REVIEW', 'TASK_REVIEW', 'TASK_STATUS_UPDATED', 'INFO'],
-  siteProgress: ['GLASS_ANALYSIS_COMPLETE', 'GLASS_ANALYSIS_COMPLETED', 'AI_ANALYSIS', 'SITE_PROGRESS_UPLOADED', 'NEW_SITE_PROGRESS_UPDATE', 'SITE_PROGRESS_RECORDED'],
-  project: ['PROJECT_UPDATE', 'MILESTONE_UPDATE', 'MILESTONE_UPDATED', 'PROJECT_DELAY_WARNING'],
-  comment: ['COMMENT', 'MENTION', 'COMMENT_MENTION'],
-};
-
-const toNumber = (value: unknown): number | undefined => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-};
-
-const pickNumber = (metadata: NotificationMetadata | null | undefined, keys: string[]) => {
-  if (!metadata) return undefined;
-  for (const key of keys) {
-    const parsed = toNumber(metadata[key]);
-    if (parsed) return parsed;
-  }
-  return undefined;
-};
-
-const normalizeType = (type?: string) => {
-  const mapped = type ? LEGACY_NOTIFICATION_TYPE_MAP[type] || type : '';
-  return String(mapped || '').trim().replace(/-/g, '_').toUpperCase();
-};
-
-const parseReferenceUrl = (referenceUrl?: string | null): NotificationRoute | null => {
-  if (!referenceUrl) return null;
-  const path = referenceUrl.split('?')[0].replace(/^https?:\/\/[^/]+/i, '');
-  const parts = path.split('/').filter(Boolean);
-  const [section, firstId, subSection, secondId] = parts;
-
-  if (section === 'tasks') return { kind: 'task', taskId: toNumber(firstId) };
-  if (section === 'projects') return { kind: 'project', projectId: toNumber(firstId) };
-  if (section === 'inventory') {
-    return {
-      kind: 'inventory',
-      projectId: toNumber(firstId),
-      inventoryItemId: subSection === 'items' ? toNumber(secondId) : undefined,
-    };
-  }
-  if (section === 'site-progress') return { kind: 'site-progress', siteProgressId: toNumber(firstId) };
-  return null;
-};
-
-const titleMatches = (notif: Notification, words: string[]) => {
-  const haystack = `${notif.title} ${notif.message}`.toLowerCase();
-  return words.some((word) => haystack.includes(word));
-};
-
-const buildNotificationRoute = (notif: Notification): NotificationRoute => {
-  const meta = notif.metadata;
-  const type = normalizeType(meta?.type ? String(meta.type) : notif.type);
-  const screen = String(meta?.screen || '').toLowerCase();
-  const projectId = pickNumber(meta, ['project_id', 'projectId']);
-  const taskId = pickNumber(meta, ['task_id', 'taskId']);
-  const inventoryItemId = pickNumber(meta, ['inventory_item_id', 'inventoryItemId', 'item_id', 'itemId']);
-  const siteProgressId = pickNumber(meta, ['site_progress_id', 'siteProgressId']);
-  const commentId = pickNumber(meta, ['comment_id', 'commentId']);
-  const referenceRoute = parseReferenceUrl(notif.reference_url);
-
-  if (referenceRoute?.kind === 'inventory') {
-    return {
-      kind: 'inventory',
-      projectId: referenceRoute.projectId || projectId,
-      inventoryItemId: referenceRoute.inventoryItemId || inventoryItemId,
-    };
-  }
-
-  if (referenceRoute?.kind === 'task') {
-    return { kind: 'task', taskId: referenceRoute.taskId || taskId };
-  }
-
-  if (referenceRoute?.kind === 'project') {
-    return { kind: 'project', projectId: referenceRoute.projectId || projectId };
-  }
-
-  if (referenceRoute?.kind === 'site-progress') {
-    return {
-      kind: 'site-progress',
-      projectId,
-      taskId,
-      siteProgressId: referenceRoute.siteProgressId || siteProgressId,
-    };
-  }
-
-  if (
-    TYPE_GROUPS.inventory.includes(type) ||
-    screen === 'inventory' ||
-    titleMatches(notif, ['critical stock', 'low stock', 'inventory'])
-  ) {
-    return { kind: 'inventory', projectId, inventoryItemId };
-  }
-
-  if (TYPE_GROUPS.comment.includes(type) || commentId) {
-    return { kind: 'comment', taskId, projectId, siteProgressId, commentId };
-  }
-
-  if (TYPE_GROUPS.siteProgress.includes(type) || screen.includes('siteprogress')) {
-    return { kind: 'site-progress', projectId, taskId, siteProgressId };
-  }
-
-  if (TYPE_GROUPS.project.includes(type) || screen.includes('projectdetails')) {
-    return { kind: 'project', projectId };
-  }
-
-  if (TYPE_GROUPS.task.includes(type) || screen.includes('taskdetails') || taskId) {
-    return { kind: 'task', taskId };
-  }
-
-  return { kind: 'unknown' };
-};
-
 export default function Notifications({
   userId,
   onNavigateToTask,
@@ -183,6 +50,8 @@ export default function Notifications({
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [error, setError] = useState<string | null>(null);
   const { theme } = useAppTheme();
+  const { width } = useWindowDimensions();
+  const screenContentStyle = centeredContent(width);
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -254,7 +123,7 @@ export default function Notifications({
   }, [fetchNotifications]);
 
   const getIcon = (type: string) => {
-    const normalized = normalizeType(type);
+    const normalized = normalizeNotificationType(type);
     switch (normalized) {
       case 'TASK_ASSIGNED':
       case 'TASK_UPDATED':
@@ -292,7 +161,7 @@ export default function Notifications({
 
 
   const getColor = (type: string) => {
-    const normalized = normalizeType(type);
+    const normalized = normalizeNotificationType(type);
     switch (normalized) {
       case 'TASK_ASSIGNED':
       case 'TASK_UPDATED':
@@ -328,17 +197,6 @@ export default function Notifications({
     }
   };
 
-  const markAsRead = async (id: number) => {
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
-    try {
-      const res = await fetch(`${API_URL}/notifications/${id}/read?userId=${userId}`, { method: 'PATCH' });
-      if (!res.ok) throw new Error('Failed to mark as read.');
-    } catch (err) {
-      console.error('Failed to mark as read:', err);
-      await fetchNotifications();
-    }
-  };
-
   const markAllRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
     try {
@@ -371,65 +229,34 @@ export default function Notifications({
   };
 
   const handleNotificationPress = (notif: Notification) => {
-    // 1. Instantly mark as read locally and in background (don't await!)
     if (!notif.is_read) {
-      markAsRead(notif.id).catch(err => console.error("Mark as read error:", err));
+      setNotifications((prev) => prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n)));
     }
 
-    const route = buildNotificationRoute(notif);
-
-    if (route.kind === 'inventory') {
-      if (onNavigateToInventory) {
-        onNavigateToInventory(route.projectId, route.inventoryItemId);
-      } else {
-        onNavigateToTab?.('home');
-      }
-      return;
-    }
-
-    if (route.kind === 'task') {
-      if (route.taskId && onNavigateToTask) onNavigateToTask(route.taskId);
-      else onNavigateToTab?.('mywork');
-      return;
-    }
-
-    if (route.kind === 'site-progress') {
-      if (onNavigateToSiteProgress) {
-        onNavigateToSiteProgress(route.projectId, route.taskId, route.siteProgressId);
-      } else if (route.taskId && onNavigateToTask) {
-        onNavigateToTask(route.taskId);
-      } else if (route.projectId && onNavigateToProject) {
-        onNavigateToProject(route.projectId);
-      } else {
-        onNavigateToTab?.('mywork');
-      }
-      return;
-    }
-
-    if (route.kind === 'project') {
-      if (route.projectId && onNavigateToProject) onNavigateToProject(route.projectId);
-      else onNavigateToTab?.('home');
-      return;
-    }
-
-    if (route.kind === 'comment') {
-      if (route.taskId && onNavigateToTask) onNavigateToTask(route.taskId);
-      else if (route.siteProgressId && onNavigateToSiteProgress) onNavigateToSiteProgress(route.projectId, route.taskId, route.siteProgressId);
-      else if (route.projectId && onNavigateToProject) onNavigateToProject(route.projectId);
-      else onNavigateToTab?.('notifications');
-      return;
-    }
-
-    onNavigateToTab?.('notifications');
+    handleNotificationNavigation(notif, userId, {
+      onNavigateToInventory,
+      onNavigateToProject,
+      onNavigateToTab,
+      onNavigateToTask: (taskId, _projectId, options) => {
+        if (options?.initialSection === 'progress' && onNavigateToSiteProgress) {
+          onNavigateToSiteProgress(undefined, taskId, undefined);
+          return;
+        }
+        onNavigateToTask?.(taskId);
+      },
+    }).catch(async (err) => {
+      console.error('Notification navigation failed:', err);
+      await fetchNotifications();
+    });
   };
 
   const getActionLabel = (notif: Notification) => {
     const route = buildNotificationRoute(notif);
     if (route.kind === 'inventory') return 'Check inventory';
+    if (route.kind === 'task' && route.initialSection === 'progress') return 'View progress';
+    if (route.kind === 'task' && route.initialSection === 'comments') return 'View comment';
     if (route.kind === 'task') return 'View task';
     if (route.kind === 'project') return 'View project';
-    if (route.kind === 'site-progress') return 'View progress';
-    if (route.kind === 'comment') return 'View comment';
     return 'View details';
   };
 
@@ -459,7 +286,7 @@ export default function Notifications({
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <ScrollView
-        className="flex-1 px-5"
+        className="flex-1"
         contentContainerStyle={{ paddingBottom: 160 }}
         refreshControl={
           <RefreshControl
@@ -469,9 +296,10 @@ export default function Notifications({
             tintColor={theme.primary}
           />
         }>
+        <View style={screenContentStyle}>
         {/* Header */}
         <View className="flex-row items-center justify-between pb-4 pt-5">
-          <View>
+          <View className="min-w-0 flex-1 pr-3">
             <Text className="text-[24px] font-bold" style={{ color: theme.primary }}>Notifications</Text>
             {loading ? (
               <SkeletonText width={104} height={12} style={{ marginTop: 8 }} />
@@ -574,8 +402,9 @@ export default function Notifications({
                 <View className="flex-1">
                   <View className="flex-row items-center justify-between mb-1">
                     <Text
-                      className="text-[15px] font-bold"
-                      style={{ color: theme.text }}>
+                      className="mr-2 flex-1 text-[15px] font-bold"
+                      style={{ color: theme.text }}
+                      numberOfLines={2}>
                       {notif.title}
                     </Text>
 
@@ -603,6 +432,7 @@ export default function Notifications({
           ))
         )}
         <View className="h-8" />
+        </View>
       </ScrollView>
     </View>
   );

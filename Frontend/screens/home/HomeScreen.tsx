@@ -8,6 +8,7 @@ import {
   Alert,
   RefreshControl,
   TouchableWithoutFeedback,
+  useWindowDimensions,
 } from 'react-native';
 
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,6 +32,8 @@ import { getPermissions } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { softCardShadow } from '../../constants/theme';
 import { ProjectCardSkeleton, SkeletonBox, SkeletonText } from '../../components/skeletons';
+import { handleNotificationNavigation } from '../../utils/notificationNavigation';
+import { centeredContent } from '../../utils/responsive';
 
 interface HomeScreenProps {
   onLogout: () => void;
@@ -81,6 +84,8 @@ export default function HomeScreen({
   const [showChangeColor, setShowChangeColor] = useState(false);
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const screenContentStyle = centeredContent(width);
   const fabBottom = Math.max(insets.bottom + 80, 100);
   const fabMenuBottom = Math.max(insets.bottom + 130, 150);
 
@@ -155,7 +160,7 @@ export default function HomeScreen({
   }, [user.id]);
 
   // Deep-link: Notification → Task Detail
-  const handleNotifNavigateToTask = async (taskId: number) => {
+  const handleNotifNavigateToTask = async (taskId: number, _projectId?: number, _options?: { initialSection?: 'progress' | 'comments' }) => {
     try {
       // Fetch the task details so we can open TaskDetailScreen
       const res = await fetch(`${API_URL}/tasks?userId=${user.id}`);
@@ -191,7 +196,7 @@ export default function HomeScreen({
     setSelectedProjectId(projectId);
   };
 
-  const handleNotifNavigateToSiteProgress = (projectId?: number, taskId?: number) => {
+  const handleNotifNavigateToSiteProgress = (projectId?: number, taskId?: number, _siteProgressId?: number) => {
     if (taskId) {
       setActiveTab('mywork');
       handleNotifNavigateToTask(taskId);
@@ -236,7 +241,9 @@ export default function HomeScreen({
         }
 
         const mappedData = filteredData.map((p: any) => {
-          if (p.image_url === 'building.jpg') p.image = require('../../assets/building.jpg');
+          if (typeof p.image_url === 'string' && p.image_url.startsWith('http')) {
+            p.image = { uri: p.image_url };
+          }
 
           // Calculate days left
           if (p.end_date) {
@@ -270,30 +277,16 @@ export default function HomeScreen({
   useEffect(() => {
     if (!notificationData) return;
 
-    const screen = String(notificationData.screen || '');
-    const taskId = Number(notificationData.task_id);
-    const projectId = Number(notificationData.project_id);
-    const inventoryItemId = Number(notificationData.inventory_item_id || notificationData.item_id);
-
-    if (screen === 'TaskDetails' && Number.isFinite(taskId)) {
-      setActiveTab('mywork');
-      handleNotifNavigateToTask(taskId);
-    } else if (screen === 'SiteProgressDetails') {
-      setActiveTab('mywork');
-    } else if (screen === 'ProjectDetails' && Number.isFinite(projectId)) {
-      setActiveTab('home');
-      setSelectedProjectId(projectId);
-    } else if (screen === 'Inventory') {
-      handleNotifNavigateToInventory(
-        Number.isFinite(projectId) ? projectId : undefined,
-        Number.isFinite(inventoryItemId) ? inventoryItemId : undefined
-      );
-    } else {
-      setActiveTab('notifications');
-    }
-
-    onNotificationHandled?.();
-  }, [notificationData]);
+    handleNotificationNavigation(notificationData, user.id, {
+      onNavigateToInventory: handleNotifNavigateToInventory,
+      onNavigateToProject: handleNotifNavigateToProject,
+      onNavigateToTask: handleNotifNavigateToTask,
+      onNavigateToTab: setActiveTab,
+    }).finally(() => {
+      fetchNotificationCount();
+      onNotificationHandled?.();
+    });
+  }, [notificationData, user.id]);
 
   const toggleFab = () => {
     const toValue = fabOpen ? 0 : 1;
@@ -330,7 +323,7 @@ export default function HomeScreen({
             ) : (
               <ScrollView
                 contentContainerStyle={{ paddingBottom: 160 }}
-                className="px-5 pt-4"
+                className="pt-4"
                 refreshControl={
                   <RefreshControl
                     refreshing={loadingProjects && projects.length > 0}
@@ -339,10 +332,11 @@ export default function HomeScreen({
                     tintColor={theme.primary}
                   />
                 }>
+                <View style={screenContentStyle}>
                 <View className="flex-row items-center justify-between">
                   <Text className="mb-1 text-[22px] font-bold" style={{ color: theme.primary }}>Home</Text>
                   <View className="px-3 py-1 rounded-full" style={{ backgroundColor: theme.primaryLight }}>
-                    <Text className="text-[10px] font-bold uppercase" style={{ color: theme.primary }}>{user.role}</Text>
+                    <Text className="text-[10px] font-bold uppercase" style={{ color: theme.primary }} numberOfLines={1}>{user.role}</Text>
                   </View>
                 </View>
                 {loadingProjects && projects.length === 0 ? (
@@ -411,6 +405,7 @@ export default function HomeScreen({
                     </TouchableOpacity>
                   ))
                 )}
+                </View>
               </ScrollView>
             )}
           </View>
@@ -545,6 +540,9 @@ export default function HomeScreen({
         onClose={() => {
           setShowSiteProgress(false);
           setPrefilledTask(null);
+          setTaskRefreshKey((value) => value + 1);
+          fetchProjects();
+          fetchNotificationCount();
         }}
       />
       <AddTaskScreen
@@ -571,7 +569,7 @@ export default function HomeScreen({
           className="flex-1 justify-end"
           style={{ backgroundColor: theme.overlay }}>
           <TouchableWithoutFeedback>
-            <View className="max-h-[72%] rounded-t-[30px] p-6 pb-10" style={{ backgroundColor: theme.elevated }}>
+            <View className="max-h-[72%] rounded-t-[30px] p-6 pb-10" style={[{ backgroundColor: theme.elevated }, screenContentStyle]}>
               <View className="mb-5 flex-row items-center justify-between">
                 <View>
                   <Text className="text-[20px] font-bold" style={{ color: theme.text }}>Select Project</Text>
@@ -706,7 +704,7 @@ export default function HomeScreen({
           onPress={() => setShowActionSheet(false)}
           className="flex-1 justify-end bg-black/40">
           <TouchableWithoutFeedback>
-            <View className="rounded-t-[30px] p-6 pb-12" style={{ backgroundColor: theme.elevated }}>
+            <View className="rounded-t-[30px] p-6 pb-12" style={[{ backgroundColor: theme.elevated }, screenContentStyle]}>
               <View className="mb-6 h-1 w-10 self-center rounded-full" style={{ backgroundColor: theme.border }} />
               <Text className="mb-4 text-center text-lg font-bold" style={{ color: theme.text }}>
                 {projectActionModal?.name}

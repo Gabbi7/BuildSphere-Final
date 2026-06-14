@@ -161,6 +161,8 @@ router.post('/:itemId/transaction', async (req, res) => {
             `Item '${item.item_name}' in ${proj.project_name || 'Project'} is at ${refreshedItem.quantity} ${refreshedItem.unit || 'pcs'} (critical: ${refreshedItem.critical_level}).`,
             {
               type: 'inventory_low_stock',
+              reference_type: 'inventory',
+              reference_id: String(itemId),
               screen: 'Inventory',
               project_id: String(item.project_id),
               inventory_item_id: String(itemId),
@@ -215,41 +217,9 @@ router.post('/', async (req, res) => {
 // PATCH /inventory/:id  — Update item metadata ONLY (name, category, etc.)
 // NOTE: Stock quantity updates are NO LONGER allowed here. Use POST /:itemId/transaction.
 router.patch('/:id', async (req, res) => {
-  const { itemName, category, criticalLevel, price, unit, updatedBy } = req.body;
-  try {
-    await ensureInventoryColumns();
-
-    const fields = [];
-    const values = [];
-    let idx = 1;
-
-    if (itemName !== undefined) { fields.push(`item_name=$${idx++}`); values.push(itemName); }
-    if (category !== undefined) { fields.push(`category=$${idx++}`); values.push(category); }
-    if (criticalLevel !== undefined) { fields.push(`critical_level=$${idx++}`); values.push(parseFloat(String(criticalLevel).replace(/[^0-9.]/g, '')) || 0); }
-    if (price !== undefined) { fields.push(`price=$${idx++}`); values.push(parseFloat(String(price).replace(/[^0-9.]/g, '')) || 0); }
-    if (unit !== undefined) { fields.push(`unit=$${idx++}`); values.push(unit); }
-
-    if (fields.length === 0) {
-      return res.status(400).json({ error: 'No updatable fields provided. Use POST /:itemId/transaction for stock changes.' });
-    }
-
-    fields.push('updated_at=NOW()');
-    values.push(req.params.id);
-
-    const result = await pool.query(
-      `UPDATE project_inventory_items SET ${fields.join(', ')} WHERE id=$${idx} RETURNING *, current_stock AS quantity`,
-      values
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Item not found.' });
-    }
-
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Fetch PATCH error:', err);
-    res.status(500).json({ error: 'Failed to update item.' });
-  }
+  res.status(405).json({
+    error: 'Inventory items cannot be edited after saving. Add a new item or record an inventory log instead.',
+  });
 });
 
 // DELETE /inventory/:id

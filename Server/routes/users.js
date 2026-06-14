@@ -4,6 +4,24 @@ const pool = require('../db');
 const bcrypt = require('bcryptjs');
 let userProfileSchemaReady = false;
 
+function normalizeDateOnly(value) {
+  if (!value) return null;
+
+  if (typeof value === 'string') {
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : value;
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(value.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  return null;
+}
+
 async function ensureUserProfileColumns() {
   if (userProfileSchemaReady) return;
   await pool.query(`
@@ -83,7 +101,7 @@ router.get('/by-email/:email', async (req, res) => {
       role: user.role || 'staff',
       phoneNumber: user.phone_number,
       gender: user.gender,
-      birthdate: user.birthdate,
+      birthdate: normalizeDateOnly(user.birthdate),
       address: user.address,
       department: user.department,
       position: user.position,
@@ -137,7 +155,7 @@ router.get('/:id', async (req, res) => {
       role: user.role,
       phoneNumber: user.phone_number,
       gender: user.gender,
-      birthdate: user.birthdate,
+      birthdate: normalizeDateOnly(user.birthdate),
       address: user.address,
       department: user.department,
       position: user.position,
@@ -196,7 +214,7 @@ router.patch('/:id/profile', async (req, res) => {
         suffix || null,
         phoneNumber || null,
         gender || null,
-        birthdate || null,
+        normalizeDateOnly(birthdate),
         address || null,
         department || null,
         position || null,
@@ -216,7 +234,7 @@ router.patch('/:id/profile', async (req, res) => {
       role: user.role,
       phoneNumber: user.phone_number,
       gender: user.gender,
-      birthdate: user.birthdate,
+      birthdate: normalizeDateOnly(user.birthdate),
       address: user.address,
       department: user.department,
       position: user.position,

@@ -8,10 +8,17 @@ const {
 } = require('../services/pushNotificationService');
 
 function mapNotificationRow(n) {
+  const metadata = {
+    ...(n.metadata || n.data || {}),
+    type: n.type,
+    reference_type: n.reference_type || n.data?.reference_type,
+    reference_id: n.reference_id || n.data?.reference_id,
+  };
+
   return {
     ...n,
     message: n.message || n.body || '',
-    metadata: n.metadata || n.data || null,
+    metadata,
     time: n.time || n.date || (n.created_at ? new Date(n.created_at).toISOString() : 'Just now'),
     date: n.date || (n.created_at ? new Date(n.created_at).toISOString().split('T')[0] : null),
     reference_url: n.reference_url || null,
