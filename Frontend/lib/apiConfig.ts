@@ -6,7 +6,9 @@ const LOCAL_API_URL_PATTERN =
   /^https?:\/\/(localhost|127\.0\.0\.1|10\.0\.2\.2|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?(\/|$)/i;
 
 const TEMPORARY_TUNNEL_URL_PATTERN = /trycloudflare\.com|loca\.lt|ngrok-free\.app|ngrok\.io/i;
-const PLACEHOLDER_API_URL_PATTERN = /YOUR_PUBLIC_BACKEND_URL|DEPLOYED_BACKEND_URL|your-buildsphere-api|YOUR_LAN_IP/i;
+const PLACEHOLDER_API_URL_PATTERN =
+  /YOUR_PUBLIC_BACKEND_URL|DEPLOYED_BACKEND_URL|your-buildsphere-api|YOUR_LAN_IP|YOUR_COMPUTER_LAN_IP/i;
+const LOCAL_DEV_API_URL = 'http://192.168.0.69:3001';
 const DEPLOYED_API_URL = 'https://buildsphere-mobile-server.onrender.com';
 
 const isDevelopmentRuntime = () =>
@@ -15,7 +17,7 @@ const isDevelopmentRuntime = () =>
 const configuredApiUrl = normalizeUrl(process.env.EXPO_PUBLIC_API_URL || '');
 export const API_URL =
   isDevelopmentRuntime() && (!configuredApiUrl || PLACEHOLDER_API_URL_PATTERN.test(configuredApiUrl))
-    ? DEPLOYED_API_URL
+    ? LOCAL_DEV_API_URL
     : configuredApiUrl;
 
 export const isLocalApiUrl = (url = API_URL) => LOCAL_API_URL_PATTERN.test(url);

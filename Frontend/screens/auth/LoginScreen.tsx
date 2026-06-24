@@ -11,7 +11,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import { API_URL, getApiConfigurationError } from '../../lib/api';
+import { API_URL, checkApiHealth, getApiConfigurationError } from '../../lib/api';
 import { UserInfo } from '../../App';
 import { useAppTheme } from '../../contexts/ThemeContext';
 
@@ -49,6 +49,10 @@ export default function LoginScreen({
     setLoading(true);
     try {
       const trimmedEmail = email.trim().toLowerCase();
+      const backendHealthy = await checkApiHealth(4000);
+      if (!backendHealthy) {
+        throw new Error(`Cannot reach BuildSphere backend at ${API_URL}. Make sure the local server is running and your phone is on the same Wi-Fi.`);
+      }
 
       const loginWithBackend = async () => {
         const authRes = await fetch(`${API_URL}/auth/login`, {
