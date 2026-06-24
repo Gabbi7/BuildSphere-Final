@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { API_URL } from '../../lib/api';
 import SiteUpdatesScreen from './SiteUpdatesScreen';
-import { type UserRole } from '../../constants/roles';
+import { getPermissions, type UserRole } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { MainTab } from '../../components/BottomNavigationBar';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
@@ -39,6 +39,7 @@ interface Props {
   canViewHome?: boolean;
   unreadCount?: number;
   onViewInventory?: (projectId: number) => void;
+  canViewInventory?: boolean;
 }
 
 const PRIMARY = '#7370FF';
@@ -153,6 +154,7 @@ export default function ProjectDetailScreen({
   canViewHome = true,
   unreadCount = 0,
   onViewInventory,
+  canViewInventory,
 }: Props) {
   const { theme } = useAppTheme();
   const { width } = useWindowDimensions();
@@ -161,6 +163,8 @@ export default function ProjectDetailScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSiteUpdates, setShowSiteUpdates] = useState(false);
+  const perms = getPermissions(userRole);
+  const mayViewInventory = canViewInventory ?? perms.canViewInventory;
 
   const loadProject = () => {
     setLoading(true);
@@ -295,7 +299,7 @@ export default function ProjectDetailScreen({
         {/* Navigation List */}
         <View className="mt-8">
           {[
-            { label: 'Inventory', key: 'inventory' },
+            ...(mayViewInventory ? [{ label: 'Inventory', key: 'inventory' }] : []),
             { label: 'Site Updates', key: 'siteUpdates' },
           ].map((item) => (
             <TouchableOpacity

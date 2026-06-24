@@ -52,10 +52,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
     canSubmitSiteUpdates: true,
   },
   foreman: { // or supervisor
-    canViewDashboard: false,
+    canViewDashboard: true,
     canCreateTasks: false,
-    canViewInventory: true,
-    canEditInventory: true,
+    canViewInventory: false,
+    canEditInventory: false,
     canAddInventory: false,
     canSubmitSiteUpdates: true,
   },

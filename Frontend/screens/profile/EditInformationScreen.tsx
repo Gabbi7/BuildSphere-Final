@@ -18,7 +18,9 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
+import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { formatRawLabel } from '../../constants/constants';
 import { formatDateOnlyDisplay, normalizeDateOnlyString, parseDateOnly, toDateOnlyString } from '../../utils/dateOnly';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
@@ -48,6 +50,9 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
   const [address, setAddress] = useState(user.address || '');
   const [department, setDepartment] = useState(user.department || '');
   const [position, setPosition] = useState(user.position || '');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [localImageUri, setLocalImageUri] = useState<string | null>(null);
 
 
@@ -67,6 +72,9 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
     address !== (user.address || '') ||
     department !== (user.department || '') ||
     position !== (user.position || '') ||
+    currentPassword.trim() ||
+    newPassword.trim() ||
+    confirmNewPassword.trim() ||
     !!localImageUri;
 
   const handleBackPress = () => {
@@ -134,6 +142,54 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
 
     setSaving(true);
     try {
+      const wantsPasswordUpdate = Boolean(currentPassword || newPassword || confirmNewPassword);
+      if (wantsPasswordUpdate) {
+        if (!currentPassword || !newPassword || !confirmNewPassword) {
+          Alert.alert('Missing password info', 'Current password, new password, and confirmation are required.');
+          setSaving(false);
+          return;
+        }
+        if (newPassword.length < 8) {
+          Alert.alert('Invalid password', 'Password must be at least 8 characters.');
+          setSaving(false);
+          return;
+        }
+        if (newPassword !== confirmNewPassword) {
+          Alert.alert('Invalid password', 'New password and confirmation must match.');
+          setSaving(false);
+          return;
+        }
+        if (newPassword === currentPassword) {
+          Alert.alert('Invalid password', 'New password cannot be the same as current password.');
+          setSaving(false);
+          return;
+        }
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData.session) {
+          Alert.alert('Session expired', 'Your session has expired. Please log in again.');
+          setSaving(false);
+          return;
+        }
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: user.email,
+          password: currentPassword,
+        });
+        if (signInError) {
+          Alert.alert('Password update failed', signInError.message);
+          setSaving(false);
+          return;
+        }
+        const { error: passwordError } = await supabase.auth.updateUser({ password: newPassword });
+        if (passwordError) {
+          Alert.alert('Password update failed', passwordError.message);
+          setSaving(false);
+          return;
+        }
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmNewPassword('');
+      }
+
       let updatedUser = { ...user };
 
       const newPhotoUrl = await uploadPhoto();
@@ -239,8 +295,8 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
 
                 {[
                   { label: 'First Name', value: firstName, setter: setFirstName, placeholder: 'Enter first name' },
-                  { label: 'Last Name', value: lastName, setter: setLastName, placeholder: 'Enter last name' },
                   { label: 'Middle Name', value: middleName, setter: setMiddleName, placeholder: 'Enter middle name' },
+                  { label: 'Last Name', value: lastName, setter: setLastName, placeholder: 'Enter last name' },
                   { label: 'Suffix', value: suffix, setter: setSuffix, placeholder: 'Jr, Sr, etc.' },
                 ].map((field, idx) => (
                   <View key={idx} className="mb-5">
@@ -254,6 +310,15 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
                     />
                   </View>
                 ))}
+
+                <Text className="mb-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: theme.textMuted }}>Email Address</Text>
+                <TextInput
+                  value={user.email}
+                  editable={false}
+                  style={[inputStyle, { opacity: 0.7 }]}
+                  placeholder="Email address"
+                  placeholderTextColor={theme.textMuted}
+                />
 
                 <Text className="mb-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: theme.textMuted }}>Birthdate</Text>
                 <TouchableOpacity
@@ -277,8 +342,7 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
 
                 {[
                   { label: 'Phone Number', value: phoneNumber, setter: setPhoneNumber, placeholder: '+63...', keyboardType: 'phone-pad' },
-                  { label: 'Department', value: department, setter: setDepartment, placeholder: 'e.g. Engineering' },
-                  { label: 'Position', value: position, setter: setPosition, placeholder: 'e.g. Project Manager' },
+                  { label: 'Gender', value: gender, setter: setGender, placeholder: 'Gender' },
                   { label: 'Address', value: address, setter: setAddress, placeholder: 'Enter address' },
                 ].map((field, idx) => (
                   <View key={idx} className="mb-5">
@@ -290,6 +354,42 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
                       placeholder={field.placeholder}
                       placeholderTextColor={theme.textMuted}
                       keyboardType={(field.keyboardType as any) || 'default'}
+                    />
+                  </View>
+                ))}
+                <View className="mb-1">
+                  <Text className="mb-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: theme.textMuted }}>Company Role</Text>
+                  <TextInput
+                    value={formatRawLabel(user.role)}
+                    editable={false}
+                    style={[inputStyle, { opacity: 0.7 }]}
+                    placeholder="Company role"
+                    placeholderTextColor={theme.textMuted}
+                  />
+                </View>
+              </View>
+
+              <View className="rounded-[24px] p-6 border mb-6" style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.02, shadowRadius: 10, elevation: 1 }}>
+                <View className="flex-row items-center mb-6">
+                  <Ionicons name="lock-closed-outline" size={16} color={theme.textMuted} />
+                  <Text className="ml-2 text-[14px] font-bold uppercase tracking-wider" style={{ color: theme.text }}>Password</Text>
+                </View>
+                {[
+                  { label: 'Current Password', value: currentPassword, setter: setCurrentPassword },
+                  { label: 'New Password', value: newPassword, setter: setNewPassword },
+                  { label: 'Confirm New Password', value: confirmNewPassword, setter: setConfirmNewPassword },
+                ].map((field) => (
+                  <View key={field.label} className="mb-5">
+                    <Text className="mb-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: theme.textMuted }}>{field.label}</Text>
+                    <TextInput
+                      value={field.value}
+                      onChangeText={field.setter}
+                      style={inputStyle}
+                      placeholder={field.label}
+                      placeholderTextColor={theme.textMuted}
+                      secureTextEntry
+                      autoComplete="off"
+                      textContentType="none"
                     />
                   </View>
                 ))}

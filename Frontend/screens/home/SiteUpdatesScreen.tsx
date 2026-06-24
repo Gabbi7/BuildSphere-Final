@@ -107,12 +107,17 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
     ].join('-');
   };
 
+  const displaySelectedDate = selectedDate.toLocaleDateString([], {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
   const activeDateKey = getDateKey(timeRange === 'Today' ? new Date() : selectedDate);
   const visibleUpdates = updates.filter((update) => (
     getDateKey(update.work_date || update.created_at) === activeDateKey
   ));
-  const updatesForDisplay = visibleUpdates.length > 0 ? visibleUpdates : updates;
-  const currentUpdate = updatesForDisplay.find(u => u.shift === activeShift) || null;
+  const currentUpdate = visibleUpdates.find(u => u.shift === activeShift) || null;
 
   const getPhotoUri = (photoPath: string) => (
     photoPath.startsWith('http') ? photoPath : `${API_URL}${photoPath}`
@@ -131,15 +136,28 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
 
   const renderCalendar = () => {
     const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-    const dates = Array.from({ length: 31 }, (_, i) => i + 1);
+    const today = new Date();
+    const shownYear = selectedDate.getFullYear();
+    const shownMonth = selectedDate.getMonth();
+    const firstDay = new Date(shownYear, shownMonth, 1).getDay();
+    const lastDate = new Date(shownYear, shownMonth + 1, 0).getDate();
+    const dates = [
+      ...Array.from({ length: firstDay }, () => null),
+      ...Array.from({ length: lastDate }, (_, i) => i + 1),
+    ];
+    const monthLabel = selectedDate.toLocaleDateString([], { month: 'long', year: 'numeric' });
     
     return (
       <View className="rounded-[24px] border p-5 mb-8" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
         <View className="flex-row items-center justify-between mb-4">
-          <Text className="text-[16px] font-bold" style={{ color: theme.text }}>January</Text>
+          <Text className="text-[16px] font-bold" style={{ color: theme.text }}>{monthLabel}</Text>
           <View className="flex-row gap-4">
-            <Ionicons name="chevron-back" size={20} color={theme.textMuted} />
-            <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
+            <TouchableOpacity onPress={() => setSelectedDate(new Date(shownYear, shownMonth - 1, 1))}>
+              <Ionicons name="chevron-back" size={20} color={theme.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setSelectedDate(new Date(shownYear, shownMonth + 1, 1))}>
+              <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
+            </TouchableOpacity>
           </View>
         </View>
         
@@ -151,12 +169,18 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
 
         
         <View className="flex-row flex-wrap justify-between">
-          {dates.map(date => {
-            const isSelected = date === 15; // Mock highlighting Jan 15 like Figure 93
+          {dates.map((date, index) => {
+            if (!date) return <View key={`blank-${index}`} className="w-8 h-8 mb-1" />;
+            const dayDate = new Date(shownYear, shownMonth, date);
+            const isSelected = getDateKey(dayDate) === getDateKey(selectedDate);
+            const isFuture = dayDate > today;
             return (
               <TouchableOpacity 
                 key={date}
-                className={`w-8 h-8 items-center justify-center rounded-full mb-1 ${isSelected ? 'bg-[#7370FF]' : ''}`}>
+                disabled={isFuture}
+                onPress={() => setSelectedDate(dayDate)}
+                className={`w-8 h-8 items-center justify-center rounded-full mb-1 ${isSelected ? 'bg-[#7370FF]' : ''}`}
+                style={{ opacity: isFuture ? 0.35 : 1 }}>
                 <Text className={`text-[12px] font-semibold ${isSelected ? 'text-white' : ''}`} style={{ color: isSelected ? 'white' : theme.text }}>
                   {date}
                 </Text>
@@ -204,32 +228,17 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
               </TouchableOpacity>
             </View>
 
-            {/* Layer 2: Shift Switcher */}
-            {timeRange === 'Today' && (
-              <View className="mb-8">
-                <View className="h-[60px] flex-row rounded-[14px] border p-1" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
-                  {SHIFT_NAMES.map((tab) => (
-                    <TouchableOpacity
-                      key={tab}
-                      onPress={() => setActiveShift(tab)}
-                      className={`flex-1 items-center justify-center rounded-[10px] ${activeShift === tab ? 'border' : ''}`}
-                      style={{ 
-                        backgroundColor: activeShift === tab ? theme.primaryLight : 'transparent',
-                        borderColor: activeShift === tab ? theme.primary : 'transparent'
-                      }}>
-                      <Text
-                        className="text-[13px] font-bold"
-                        style={{ color: activeShift === tab ? theme.primary : theme.textMuted }}>
-                        {tab}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+            <Text className="mb-3 text-[18px] font-bold" style={{ color: theme.text }}>
+              {timeRange === 'Today' ? "Today's Site Progress" : `Site Progress for ${displaySelectedDate}`}
+            </Text>
 
-                <View className="mt-3 flex-row gap-2">
+            {/* Shift Cards */}
+            {(timeRange === 'Today' || timeRange === 'Past') && (
+              <View className="mb-8">
+                <View className="flex-row gap-2">
                   {SHIFT_NAMES.map((shift) => {
                     const isActive = activeShift === shift;
-                    const total = shiftTotals[shift];
+                    const total = Number.isFinite(shiftTotals[shift]) ? shiftTotals[shift] : 0;
 
                     return (
                       <TouchableOpacity
@@ -299,6 +308,17 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
               </View>
             ) : (
               <View>
+                {visibleUpdates.length === 0 ? (
+                  <View className="mb-8 items-center justify-center rounded-[24px] border border-dashed p-8" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
+                    <Ionicons name="calendar-outline" size={34} color={theme.textMuted} />
+                    <Text className="mt-3 text-center text-[14px] font-semibold" style={{ color: theme.textMuted }}>
+                      {timeRange === 'Today'
+                        ? 'No site updates recorded for today.'
+                        : `No site updates recorded for ${displaySelectedDate}.`}
+                    </Text>
+                  </View>
+                ) : (
+                <>
                 {/* Photo Container */}
                 <View className="mb-6">
                   {(() => {
@@ -426,6 +446,8 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                   )}
 
                 </View>
+                </>
+                )}
               </View>
             )}
           </View>

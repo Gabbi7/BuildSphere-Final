@@ -156,7 +156,7 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
               label = 'In Progress';
             } else if (filter === 'in-review') {
               color = '#FF9800';
-              label = 'In Review';
+              label = 'To Review';
             } else if (filter === 'completed') {
               color = '#4CAF50';
               label = 'Completed';

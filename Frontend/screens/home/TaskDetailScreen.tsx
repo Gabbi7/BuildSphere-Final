@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getPermissions, type UserRole } from '../../constants/roles';
 import { API_URL } from '../../lib/api';
 import { normalizeImageUrl } from '../../lib/imageUrls';
+import { formatRawLabel } from '../../constants/constants';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
@@ -136,11 +137,11 @@ export default function TaskDetailScreen({
       case 'in review':
       case 'in-review':
       case 'in_review':
-        return { bg: theme.mode === 'dark' ? '#3d2e1a' : '#FFF4E5', text: '#FF9800', label: 'In Review' };
+        return { bg: theme.mode === 'dark' ? '#3d2e1a' : '#FFF4E5', text: '#FF9800', label: 'To Review' };
       case 'completed':
         return { bg: theme.mode === 'dark' ? '#1a3d24' : '#E8F5E9', text: '#4CAF50', label: 'Completed' };
       default:
-        return { bg: theme.surface, text: theme.textSecondary, label: status || 'To Do' };
+        return { bg: theme.surface, text: theme.textSecondary, label: formatRawLabel(status, 'To Do') };
     }
   };
 
@@ -276,13 +277,13 @@ export default function TaskDetailScreen({
               <View className="flex-1">
                 <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Phase</Text>
                 <Text className="text-[15px] font-bold" style={{ color: theme.text }}>
-                  {task.phase || 'Phase 1'}
+                  {formatRawLabel(task.phase, 'Not set')}
                 </Text>
               </View>
               <View className="flex-1 items-center">
                 <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Milestone</Text>
                 <Text className="text-[15px] font-bold" style={{ color: theme.text }}>
-                  {task.milestone || 'Milestone 1'}
+                  {formatRawLabel(task.milestone, 'Not set')}
                 </Text>
               </View>
               <View className="flex-1 items-end">
@@ -483,22 +484,21 @@ export default function TaskDetailScreen({
 
 
 
-          <View className="mb-8">
-            <Text className="mb-4 text-[18px] font-bold" style={{ color: theme.text }}>Project Oversight</Text>
-            <TouchableOpacity
-              onPress={handleInventoryPress}
-              disabled={!perms.canViewInventory}
-              className="h-[60px] w-full flex-row items-center justify-center rounded-[16px]"
-              style={{ backgroundColor: perms.canViewInventory ? theme.primary : theme.textMuted }}>
-              <Ionicons name="cube-outline" size={24} color="white" />
-              <Text className="ml-3 font-bold text-white">Audit Project Inventory</Text>
-            </TouchableOpacity>
-            <Text className="mt-2 text-center text-[12px] italic" style={{ color: theme.textMuted }}>
-              {perms.canViewInventory
-                ? 'Verification access for project materials & budgets.'
-                : 'Your role does not have inventory audit access.'}
-            </Text>
-          </View>
+          {perms.canViewInventory && (
+            <View className="mb-8">
+              <Text className="mb-4 text-[18px] font-bold" style={{ color: theme.text }}>Project Oversight</Text>
+              <TouchableOpacity
+                onPress={handleInventoryPress}
+                className="h-[60px] w-full flex-row items-center justify-center rounded-[16px]"
+                style={{ backgroundColor: theme.primary }}>
+                <Ionicons name="cube-outline" size={24} color="white" />
+                <Text className="ml-3 font-bold text-white">Audit Project Inventory</Text>
+              </TouchableOpacity>
+              <Text className="mt-2 text-center text-[12px] italic" style={{ color: theme.textMuted }}>
+                Verification access for project materials & budgets.
+              </Text>
+            </View>
+          )}
 
           {/* Comments Section */}
           <View className="mb-10 rounded-[24px] border p-6" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
@@ -754,7 +754,7 @@ export default function TaskDetailScreen({
             {[
               { label: 'To Do', value: 'todo', icon: 'list-outline' as const, color: '#FF6B6B', bg: '#FFEBEB' },
               { label: 'In Progress', value: 'in_progress', icon: 'play-outline' as const, color: '#7370FF', bg: '#EAE8FF' },
-              { label: 'In Review', value: 'in_review', icon: 'eye-outline' as const, color: '#FF9800', bg: '#FFF4E5' },
+              { label: 'To Review', value: 'in_review', icon: 'eye-outline' as const, color: '#FF9800', bg: '#FFF4E5' },
               { label: 'Completed', value: 'completed', icon: 'checkmark-done-outline' as const, color: '#4CAF50', bg: '#E8F5E9' },
             ].map((item) => (
               <TouchableOpacity

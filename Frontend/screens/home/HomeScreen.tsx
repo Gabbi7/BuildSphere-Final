@@ -54,6 +54,83 @@ interface Project {
   image?: any;
 }
 
+interface AssignedTaskProject {
+  project_id?: number | string | null;
+  projectId?: number | string | null;
+  project?: string | null;
+}
+
+const INVENTORY_PERMISSION_MESSAGE = 'You do not have permission to access Inventory.';
+
+const normalizeRole = (role?: string) => String(role || '').toLowerCase().replace(/[\s-]+/g, '_');
+
+const toPositiveNumber = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const projectMatchesAssignedUser = (project: any, userId: number) => {
+  const userIdText = String(userId);
+  const directUserFields = [
+    project.project_in_charge_id,
+    project.projectInChargeId,
+    project.foreman_id,
+    project.foremanId,
+    project.assigned_to,
+    project.assignedTo,
+    project.user_id,
+    project.userId,
+  ];
+
+  if (directUserFields.some((value) => value != null && String(value) === userIdText)) return true;
+
+  const arrayFields = [
+    project.assigned_user_ids,
+    project.assignedUserIds,
+    project.assigned_users,
+    project.assignedUsers,
+    project.team_user_ids,
+    project.teamUserIds,
+    project.member_ids,
+    project.memberIds,
+  ];
+
+  return arrayFields.some((value) => {
+    if (!Array.isArray(value)) return false;
+    return value.some((item) => {
+      if (item == null) return false;
+      if (typeof item === 'object') {
+        return String((item as any).id ?? (item as any).user_id ?? (item as any).userId ?? '') === userIdText;
+      }
+      return String(item) === userIdText;
+    });
+  });
+};
+
+const filterAssignedProjects = (allProjects: any[], assignedTasks: AssignedTaskProject[], userId: number) => {
+  const taskProjectIds = new Set(
+    assignedTasks
+      .map((task) => toPositiveNumber(task.project_id ?? task.projectId))
+      .filter((id): id is number => id !== null)
+      .map(String)
+  );
+  const taskProjectNames = new Set(
+    assignedTasks
+      .map((task) => String(task.project || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  return allProjects.filter((project) => {
+    const projectId = toPositiveNumber(project.id);
+    const projectName = String(project.name || project.project_name || '').trim().toLowerCase();
+    return (
+      (projectId !== null && taskProjectIds.has(String(projectId))) ||
+      (!!projectName && taskProjectNames.has(projectName)) ||
+      projectMatchesAssignedUser(project, userId)
+    );
+  });
+};
+
 
 export default function HomeScreen({
   onLogout,
@@ -91,6 +168,8 @@ export default function HomeScreen({
 
   // RBAC: Filtered FAB Actions 
   const perms = useMemo(() => getPermissions(user.role), [user.role]);
+  const normalizedRole = useMemo(() => normalizeRole(user.role), [user.role]);
+  const canAccessInventory = perms.canViewInventory;
 
   const FAB_ACTIONS = useMemo(() => {
     const actions = [];
@@ -102,6 +181,36 @@ export default function HomeScreen({
       actions.push({ label: 'Upload Site Progress', icon: 'cloud-upload-outline', key: 'site' });
     return actions;
   }, [perms]);
+
+  const showInventoryPermissionMessage = () => {
+    Alert.alert('Access denied', INVENTORY_PERMISSION_MESSAGE);
+  };
+
+  const closeInventoryViews = () => {
+    setShowInventory(false);
+    setShowInventoryProjectPicker(false);
+    setInventoryProjectId(null);
+    setHighlightInventoryItemId(null);
+  };
+
+  const openInventory = (projectId?: number, inventoryItemId?: number | null) => {
+    if (!canAccessInventory) {
+      closeInventoryViews();
+      showInventoryPermissionMessage();
+      return false;
+    }
+
+    if (!projectId) {
+      setHighlightInventoryItemId(inventoryItemId ?? null);
+      setShowInventoryProjectPicker(true);
+      return true;
+    }
+
+    setInventoryProjectId(projectId);
+    setHighlightInventoryItemId(inventoryItemId ?? null);
+    setShowInventory(true);
+    return true;
+  };
 
   const handleProjectAction = (project: Project) => {
     setProjectActionModal(project);
@@ -118,6 +227,12 @@ export default function HomeScreen({
       setActiveTab('mywork');
     }
   }, [perms.canViewDashboard, activeTab]);
+
+  useEffect(() => {
+    if (!canAccessInventory && (showInventory || showInventoryProjectPicker)) {
+      closeInventoryViews();
+    }
+  }, [canAccessInventory, showInventory, showInventoryProjectPicker]);
 
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -170,7 +285,7 @@ export default function HomeScreen({
         setSelectedTask(task);
       } else {
         // Task not assigned to this user — still try to show basic info
-        setSelectedTask({ id: taskId, title: `Task #${taskId}`, status: 'pending' });
+        setSelectedTask({ id: taskId, title: 'Untitled Task', status: 'pending' });
       }
     } catch (err) {
       console.error('Failed to navigate to task:', err);
@@ -179,13 +294,18 @@ export default function HomeScreen({
 
   // Deep-link: Notification → Inventory
   const handleNotifNavigateToInventory = (projectId?: number, inventoryItemId?: number) => {
-    setHighlightInventoryItemId(inventoryItemId ?? null);
-    if (!projectId) {
-      setShowInventoryProjectPicker(true);
+    if (!canAccessInventory) {
+      closeInventoryViews();
+      if (projectId) {
+        Alert.alert('Access denied', INVENTORY_PERMISSION_MESSAGE);
+        handleNotifNavigateToProject(projectId);
+      } else {
+        showInventoryPermissionMessage();
+      }
       return;
     }
-    setInventoryProjectId(projectId);
-    setShowInventory(true);
+
+    openInventory(projectId, inventoryItemId);
   };
 
   const handleNotifNavigateToProject = (projectId: number) => {
@@ -228,51 +348,59 @@ export default function HomeScreen({
 
   };
 
-  const fetchProjects = () => {
+  const fetchProjects = async () => {
     setLoadingProjects(true);
     setProjectsError(null);
-    fetch(`${API_URL}/projects`)
-      .then((res) => res.json())
-      .then((data) => {
-        // ─── RBAC: Filter projects for Project Engineers (PIC only) ───
-        let filteredData = data;
-        if (user.role.toLowerCase() === 'project_engineer') {
-          filteredData = data.filter((p: any) => String(p.project_in_charge_id) === String(user.id));
+    try {
+      const [projectsRes, tasksRes] = await Promise.all([
+        fetch(`${API_URL}/projects`),
+        fetch(`${API_URL}/tasks?userId=${user.id}`),
+      ]);
+
+      if (!projectsRes.ok) throw new Error('Failed to fetch projects.');
+
+      const data = await projectsRes.json();
+      const tasksData = tasksRes.ok ? await tasksRes.json() : [];
+      const allProjects = Array.isArray(data) ? data : [];
+      const assignedTasks = Array.isArray(tasksData) ? tasksData : [];
+
+      let filteredData = allProjects;
+      if (normalizedRole === 'project_engineer' || normalizedRole === 'foreman') {
+        filteredData = filterAssignedProjects(allProjects, assignedTasks, user.id);
+      }
+
+      const mappedData = filteredData.map((p: any) => {
+        if (typeof p.image_url === 'string' && p.image_url.startsWith('http')) {
+          p.image = { uri: p.image_url };
         }
 
-        const mappedData = filteredData.map((p: any) => {
-          if (typeof p.image_url === 'string' && p.image_url.startsWith('http')) {
-            p.image = { uri: p.image_url };
-          }
+        // Calculate days left
+        if (p.end_date) {
+          const end = new Date(p.end_date);
+          const now = new Date();
+          const diff = end.getTime() - now.getTime();
+          const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+          p.daysLeft = days > 0 ? days : 0;
+        }
 
-          // Calculate days left
-          if (p.end_date) {
-            const end = new Date(p.end_date);
-            const now = new Date();
-            const diff = end.getTime() - now.getTime();
-            const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-            p.daysLeft = days > 0 ? days : 0;
-          }
+        const rawProgress = Number(p.progress_percentage ?? p.progress);
+        p.progress = Number.isFinite(rawProgress) ? Math.min(100, Math.max(0, Math.round(rawProgress))) : 0;
 
-          // Ensure progress is a number
-          p.progress = Number(p.progress) || 0;
-
-          return p;
-        });
-        console.log('Projects loaded with colors:', mappedData.map((p: any) => p.color));
-        setProjects(mappedData);
-        setLoadingProjects(false);
-      })
-      .catch((err) => {
-        console.error('Dashboard Projects Fetch Error:', err);
-        setProjectsError('Could not load projects. Pull to refresh or tap retry.');
-        setLoadingProjects(false);
+        return p;
       });
+      console.log('Projects loaded with colors:', mappedData.map((p: any) => p.color));
+      setProjects(mappedData);
+    } catch (err) {
+      console.error('Dashboard Projects Fetch Error:', err);
+      setProjectsError('Could not load projects. Pull to refresh or tap retry.');
+    } finally {
+      setLoadingProjects(false);
+    }
   };
 
   useEffect(() => {
     fetchProjects();
-  }, []);
+  }, [user.id, normalizedRole]);
 
   useEffect(() => {
     if (!notificationData) return;
@@ -309,10 +437,9 @@ export default function HomeScreen({
                 userId={user.id}
                 canViewHome={perms.canViewDashboard}
                 unreadCount={unreadCount}
+                canViewInventory={canAccessInventory}
                 onViewInventory={(projectId) => {
-                  setInventoryProjectId(projectId);
-                  setHighlightInventoryItemId(null);
-                  setShowInventory(true);
+                  openInventory(projectId);
                 }}
                 onBack={() => {
                   setSelectedProjectId(null);
@@ -399,6 +526,7 @@ export default function HomeScreen({
                         color={p.color}
                         image={p.image}
                         progress={p.progress}
+                        status={p.status}
                         daysLeft={p.daysLeft}
                         onAction={perms.canCreateTasks ? () => handleProjectAction(p) : undefined}
                       />
@@ -470,7 +598,7 @@ export default function HomeScreen({
                     if (action.key === 'site') setShowSiteProgress(true);
                     if (action.key === 'task') setShowAddTask(true);
                     if (action.key === 'inventory') {
-                      setShowInventoryProjectPicker(true);
+                      openInventory();
                     }
                   }}
                   className="flex-row items-center rounded-[14px] px-4 py-3"
@@ -559,7 +687,7 @@ export default function HomeScreen({
 
       {/* Project Picker for Global Inventory Action */}
       <Modal
-        visible={showInventoryProjectPicker}
+        visible={showInventoryProjectPicker && canAccessInventory}
         transparent
         animationType="slide"
         onRequestClose={() => setShowInventoryProjectPicker(false)}>
@@ -668,9 +796,7 @@ export default function HomeScreen({
         onViewInventory={(projectId) => {
 
           setSelectedTask(null);
-          setInventoryProjectId(projectId);
-          setHighlightInventoryItemId(null);
-          setShowInventory(true);
+          openInventory(projectId);
         }}
       />
       {showInventory && inventoryProjectId && (

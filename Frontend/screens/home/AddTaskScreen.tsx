@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL } from '../../lib/api';
+import { formatRawLabel } from '../../constants/constants';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
 
@@ -33,13 +34,48 @@ interface UserOption {
   role?: string;
 }
 
+interface MilestoneOption {
+  id: number;
+  project_id?: number;
+  project_phase_id?: number;
+  milestone_name?: string;
+  name?: string;
+  title?: string;
+  sequence?: number;
+  sequence_no?: number;
+  sort_order?: number;
+  display_order?: number;
+  milestone_order?: number;
+  order?: number;
+  position?: number;
+  start_date?: string;
+  due_date?: string;
+  created_at?: string;
+}
+
+interface PhaseOption {
+  id: number;
+  project_id?: number;
+  phase_key?: string;
+  phase_title?: string;
+  name?: string;
+  sequence?: number;
+  sequence_no?: number;
+  sort_order?: number;
+  display_order?: number;
+  phase_order?: number;
+  order?: number;
+  position?: number;
+  milestones?: MilestoneOption[];
+}
+
 interface PickedAttachment {
   uri: string;
   name: string;
   type: string;
 }
 
-type SelectorKind = 'project' | 'assignedTo' | 'priority';
+type SelectorKind = 'project' | 'phase' | 'milestone' | 'assignedTo' | 'priority';
 
 interface SelectorOption {
   value: string;
@@ -97,6 +133,54 @@ const PRIORITIES = [
   { value: 'high', label: 'High' },
   { value: 'urgent', label: 'Urgent' },
 ];
+
+const PHASE_ORDER = [
+  'Preparation Planning',
+  'Procurement',
+  'Mobilization',
+  'Execution',
+  'Completion',
+  'Close Out',
+];
+
+const numericOrder = (item: Record<string, any>, keys: string[]) => {
+  for (const key of keys) {
+    const number = Number(item[key]);
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
+};
+
+const phaseLabel = (phase: PhaseOption) =>
+  formatRawLabel(phase.phase_title || phase.name || phase.phase_key || '', 'Untitled Phase');
+
+const milestoneLabel = (milestone: MilestoneOption) =>
+  formatRawLabel(milestone.milestone_name || milestone.name || milestone.title || '', 'Untitled Milestone');
+
+const sortPhases = (phases: PhaseOption[]) =>
+  [...phases].sort((a, b) => {
+    const aOrder = numericOrder(a, ['sequence', 'sequence_no', 'sort_order', 'display_order', 'phase_order', 'order', 'position']);
+    const bOrder = numericOrder(b, ['sequence', 'sequence_no', 'sort_order', 'display_order', 'phase_order', 'order', 'position']);
+    if (aOrder !== null || bOrder !== null) return (aOrder ?? Number.MAX_SAFE_INTEGER) - (bOrder ?? Number.MAX_SAFE_INTEGER);
+    const aIndex = PHASE_ORDER.indexOf(phaseLabel(a));
+    const bIndex = PHASE_ORDER.indexOf(phaseLabel(b));
+    return (aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex) - (bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex);
+  });
+
+const sortMilestones = (milestones: MilestoneOption[]) =>
+  [...milestones].sort((a, b) => {
+    const aOrder = numericOrder(a, ['sequence', 'sequence_no', 'sort_order', 'display_order', 'milestone_order', 'order', 'position']);
+    const bOrder = numericOrder(b, ['sequence', 'sequence_no', 'sort_order', 'display_order', 'milestone_order', 'order', 'position']);
+    if (aOrder !== null || bOrder !== null) return (aOrder ?? Number.MAX_SAFE_INTEGER) - (bOrder ?? Number.MAX_SAFE_INTEGER);
+    for (const key of ['start_date', 'due_date', 'created_at']) {
+      const aValue = a[key as keyof MilestoneOption];
+      const bValue = b[key as keyof MilestoneOption];
+      const aTime = aValue ? new Date(String(aValue)).getTime() : Number.MAX_SAFE_INTEGER;
+      const bTime = bValue ? new Date(String(bValue)).getTime() : Number.MAX_SAFE_INTEGER;
+      if (aTime !== bTime) return aTime - bTime;
+    }
+    return milestoneLabel(a).localeCompare(milestoneLabel(b));
+  });
 
 const toDateInput = (date: Date) => {
   const year = date.getFullYear();
@@ -197,14 +281,20 @@ export default function AddTaskScreen({
   const [selector, setSelector] = useState<SelectorKind | null>(null);
 
   const [projectId, setProjectId] = useState('');
+  const [phaseId, setPhaseId] = useState('');
+  const [milestoneId, setMilestoneId] = useState('');
+  const [phases, setPhases] = useState<PhaseOption[]>([]);
+  const [milestones, setMilestones] = useState<MilestoneOption[]>([]);
+  const [loadingPlan, setLoadingPlan] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [assignedTo, setAssignedTo] = useState('');
   const [priority, setPriority] = useState('medium');
-  const [startDate, setStartDate] = useState('');
-  const [dueDate, setDueDate] = useState('');
+  const [startDate, setStartDate] = useState(toDateInput(new Date()));
+  const [dueDate, setDueDate] = useState(toDateInput(new Date()));
   const [attachment, setAttachment] = useState<PickedAttachment | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [successVisible, setSuccessVisible] = useState(false);
 
   const projectOptions = dbProjects.length > 0 ? dbProjects : projects;
 
@@ -218,6 +308,16 @@ export default function AddTaskScreen({
     if (!user) return '';
     return `${user.name}${user.role ? ` - ${user.role}` : ''}`;
   }, [assignedTo, users]);
+
+  const selectedPhaseLabel = useMemo(() => {
+    const phase = phases.find((item) => String(item.id) === phaseId);
+    return phase ? phaseLabel(phase) : '';
+  }, [phaseId, phases]);
+
+  const selectedMilestoneLabel = useMemo(() => {
+    const milestone = milestones.find((item) => String(item.id) === milestoneId);
+    return milestone ? milestoneLabel(milestone) : '';
+  }, [milestoneId, milestones]);
 
   const selectedPriorityLabel = PRIORITIES.find((item) => item.value === priority)?.label || '';
 
@@ -249,6 +349,30 @@ export default function AddTaskScreen({
       };
     }
 
+    if (selector === 'phase') {
+      return {
+        title: 'Select Phase',
+        selectedValue: phaseId,
+        emptyText: projectId ? 'No phases available for this project.' : 'Select a project first.',
+        options: phases.map((phase) => ({
+          value: String(phase.id),
+          label: phaseLabel(phase),
+        })),
+      };
+    }
+
+    if (selector === 'milestone') {
+      return {
+        title: 'Select Milestone',
+        selectedValue: milestoneId,
+        emptyText: phaseId ? 'No milestones available for this phase.' : 'Select a phase first.',
+        options: milestones.map((milestone) => ({
+          value: String(milestone.id),
+          label: milestoneLabel(milestone),
+        })),
+      };
+    }
+
     return {
       title: 'Priority Level',
       selectedValue: priority,
@@ -260,6 +384,10 @@ export default function AddTaskScreen({
     };
   }, [
     assignedTo,
+    phaseId,
+    milestoneId,
+    phases,
+    milestones,
     priority,
     projectId,
     projectOptions,
@@ -269,6 +397,8 @@ export default function AddTaskScreen({
 
   const isDirty = Boolean(
     projectId ||
+      phaseId ||
+      milestoneId ||
       title.trim() ||
       description.trim() ||
       assignedTo ||
@@ -305,12 +435,17 @@ export default function AddTaskScreen({
 
   const resetForm = () => {
     setProjectId('');
+    setPhaseId('');
+    setMilestoneId('');
+    setPhases([]);
+    setMilestones([]);
     setTitle('');
     setDescription('');
     setAssignedTo('');
     setPriority('medium');
-    setStartDate('');
-    setDueDate('');
+    const today = toDateInput(new Date());
+    setStartDate(today);
+    setDueDate(today);
     setAttachment(null);
     setErrors({});
     setShowStartPicker(false);
@@ -320,6 +455,9 @@ export default function AddTaskScreen({
 
   useEffect(() => {
     if (!visible) return;
+    const today = toDateInput(new Date());
+    setStartDate(today);
+    setDueDate(today);
     setDbProjects(projects);
     setLoadingMeta(true);
     fetch(`${API_URL}/tasks/meta`)
@@ -335,16 +473,42 @@ export default function AddTaskScreen({
       .finally(() => setLoadingMeta(false));
   }, [projects, visible]);
 
+  useEffect(() => {
+    if (!visible || !projectId) return;
+    setLoadingPlan(true);
+    setPhaseId('');
+    setMilestoneId('');
+    setMilestones([]);
+    fetch(`${API_URL}/projects/${projectId}/milestone-plan`)
+      .then((res) => res.json())
+      .then((data) => {
+        setPhases(Array.isArray(data?.phases) ? sortPhases(data.phases) : []);
+      })
+      .catch((err) => {
+        console.error('Failed to fetch milestone plan:', err);
+        setPhases([]);
+      })
+      .finally(() => setLoadingPlan(false));
+  }, [projectId, visible]);
+
+  useEffect(() => {
+    const phase = phases.find((item) => String(item.id) === phaseId);
+    setMilestoneId('');
+    setMilestones(phase?.milestones ? sortMilestones(phase.milestones) : []);
+  }, [phaseId, phases]);
+
   const validate = () => {
     const nextErrors: Record<string, string> = {};
     if (!projectId) nextErrors.project_id = 'Project is required.';
     if (!title.trim()) nextErrors.title = 'Task title is required.';
+    if (!phaseId) nextErrors.phase_id = 'Phase is required.';
+    if (!milestoneId) nextErrors.milestone_id = 'Milestone is required.';
     if (!assignedTo) nextErrors.assigned_to = 'Assigned user is required.';
     if (!priority) nextErrors.priority = 'Priority is required.';
     if (!startDate) nextErrors.start_date = 'Start date is required.';
-    if (!dueDate) nextErrors.due_date = 'Finish date is required.';
+    if (!dueDate) nextErrors.due_date = 'Due date is required.';
     if (startDate && dueDate && dueDate < startDate) {
-      nextErrors.due_date = 'Finish date cannot be earlier than start date.';
+      nextErrors.due_date = 'Due date cannot be earlier than the start date.';
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -360,7 +524,18 @@ export default function AddTaskScreen({
 
     if (selector === 'project') {
       setProjectId(value);
+      setPhaseId('');
+      setMilestoneId('');
+      setPhases([]);
+      setMilestones([]);
       setErrors((prev) => ({ ...prev, project_id: '' }));
+    } else if (selector === 'phase') {
+      setPhaseId(value);
+      setMilestoneId('');
+      setErrors((prev) => ({ ...prev, phase_id: '', milestone_id: '' }));
+    } else if (selector === 'milestone') {
+      setMilestoneId(value);
+      setErrors((prev) => ({ ...prev, milestone_id: '' }));
     } else if (selector === 'assignedTo') {
       setAssignedTo(value);
       setErrors((prev) => ({ ...prev, assigned_to: '' }));
@@ -424,13 +599,13 @@ export default function AddTaskScreen({
       setErrors((prev) => ({
         ...prev,
         start_date: '',
-        due_date: dueDate && dueDate < formatted ? 'Finish date cannot be earlier than start date.' : '',
+        due_date: dueDate && dueDate < formatted ? 'Due date cannot be earlier than the start date.' : '',
       }));
     } else {
       setDueDate(formatted);
       setErrors((prev) => ({
         ...prev,
-        due_date: startDate && formatted < startDate ? 'Finish date cannot be earlier than start date.' : '',
+        due_date: startDate && formatted < startDate ? 'Due date cannot be earlier than the start date.' : '',
       }));
     }
   };
@@ -446,6 +621,8 @@ export default function AddTaskScreen({
       const formData = new FormData();
       formData.append('title', title.trim());
       formData.append('project_id', projectId);
+      formData.append('phase_id', phaseId);
+      formData.append('milestone_id', milestoneId);
       formData.append('description', description.trim());
       formData.append('assigned_to', assignedTo);
       formData.append('priority', priority);
@@ -477,8 +654,7 @@ export default function AddTaskScreen({
 
       resetForm();
       onTaskAdded();
-      Alert.alert('Task created', 'The task was saved and assigned successfully.');
-      onClose();
+      setSuccessVisible(true);
     } catch (error) {
       console.error('Error adding task:', error);
       Alert.alert('Connection Error', 'Could not reach the server.');
@@ -616,7 +792,7 @@ export default function AddTaskScreen({
             ) : (
               <>
                 <Section title="Project Details" icon="folder-open-outline" {...sectionStyleProps}>
-                  <FieldWrap className="mb-0">
+                  <FieldWrap>
                     <FormLabel color={labelColor}>Project *</FormLabel>
                     <SelectField
                       value={selectedProjectLabel}
@@ -625,6 +801,28 @@ export default function AddTaskScreen({
                       {...selectStyleProps}
                     />
                     <FieldErrorText message={errors.project_id} color={theme.danger} />
+                  </FieldWrap>
+                  <FieldWrap>
+                    <FormLabel color={labelColor}>Phase *</FormLabel>
+                    <SelectField
+                      value={selectedPhaseLabel}
+                      placeholder={loadingPlan ? 'Loading phases...' : 'Select phase'}
+                      disabled={!projectId || loadingPlan}
+                      onPress={() => openSelector('phase')}
+                      {...selectStyleProps}
+                    />
+                    <FieldErrorText message={errors.phase_id} color={theme.danger} />
+                  </FieldWrap>
+                  <FieldWrap className="mb-0">
+                    <FormLabel color={labelColor}>Milestone *</FormLabel>
+                    <SelectField
+                      value={selectedMilestoneLabel}
+                      placeholder="Select milestone"
+                      disabled={!phaseId}
+                      onPress={() => openSelector('milestone')}
+                      {...selectStyleProps}
+                    />
+                    <FieldErrorText message={errors.milestone_id} color={theme.danger} />
                   </FieldWrap>
                 </Section>
 
@@ -793,6 +991,28 @@ export default function AddTaskScreen({
             </TouchableOpacity>
           </View>
         </View>
+        <Modal visible={successVisible} transparent animationType="fade">
+          <View className="flex-1 items-center justify-center px-6" style={{ backgroundColor: 'rgba(0, 0, 0, 0.45)' }}>
+            <View className="w-full rounded-[24px] p-6" style={{ backgroundColor: theme.elevated, maxWidth: 420 }}>
+              <View className="mb-4 h-16 w-16 items-center justify-center self-center rounded-full" style={{ backgroundColor: theme.primary }}>
+                <Ionicons name="checkmark" size={34} color="white" />
+              </View>
+              <Text className="text-center text-[20px] font-bold" style={{ color: theme.text }}>Task Added.</Text>
+              <Text className="mt-2 text-center text-[14px] leading-5" style={{ color: theme.textMuted }}>
+                Task added. Please inform the assignee.
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setSuccessVisible(false);
+                  onClose();
+                }}
+                className="mt-6 h-12 items-center justify-center rounded-xl"
+                style={{ backgroundColor: theme.primary }}>
+                <Text className="text-[14px] font-bold text-white">Back to Task</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
         <SelectorSheet />
       </KeyboardAvoidingView>
     </Modal>

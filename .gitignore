@@ -1,15 +1,22 @@
 node_modules/
 .expo/
 .env
+.env.*
+!.env.example
+!.env.*.example
 .DS_Store
 *.apk
 *.log
+*.exe
+*.brotli.txt
+*.inflateRaw.txt
 Devign-Document.pdf
 
 # Mobile Frontend
 Frontend/node_modules/
 Frontend/.expo/
 Frontend/expo-env.d.ts
+Frontend/Frontend/
 
 # Backend Server
 Server/node_modules/

@@ -4,9 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { UserInfo } from '../../App';
 import EditInformationScreen from './EditInformationScreen';
 import { API_URL } from '../../lib/api';
+import { formatRawLabel } from '../../constants/constants';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ProfileSkeleton } from '../../components/skeletons';
-import { calculateAgeFromDateOnly, formatDateOnlyDisplay } from '../../utils/dateOnly';
+import { formatDateOnlyDisplay } from '../../utils/dateOnly';
 import { centeredContent } from '../../utils/responsive';
 
 interface MoreScreenProps {
@@ -58,7 +59,6 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
     : null;
 
   const fullName = [firstName, middleName, lastName, suffix].filter(Boolean).join(' ');
-  const age = calculateAgeFromDateOnly(profile.birthdate);
 
   if (screen === 'editInfo') {
     return (
@@ -113,7 +113,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
 
           <Text className="mt-4 text-[20px] font-bold" style={{ color: theme.text }}>{fullName || 'Unnamed User'}</Text>
           <Text className="mt-1 text-center text-[13px]" style={{ color: theme.textMuted }} numberOfLines={2}>{profile.email}</Text>
-          <Text className="mt-1 text-[12px] uppercase" style={{ color: theme.textSecondary }}>{profile.role || 'staff'}</Text>
+          <Text className="mt-1 text-[12px]" style={{ color: theme.textSecondary }}>{formatRawLabel(profile.role, 'Staff')}</Text>
         </View>
 
         <View 
@@ -143,9 +143,12 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
             {[
               { icon: 'call-outline', label: 'Phone', value: profile.phoneNumber, color: '#4dabf7' },
               { icon: 'calendar-outline', label: 'Birthdate', value: formatDateOnlyDisplay(profile.birthdate), color: '#ff922b' },
-              { icon: 'hourglass-outline', label: 'Age', value: age, color: '#51cf66' },
-              { icon: 'business-outline', label: 'Dept', value: profile.department, color: '#7370FF' },
-              { icon: 'briefcase-outline', label: 'Position', value: profile.position, color: '#f06595' },
+              { icon: 'person-outline', label: 'Gender', value: profile.gender, color: '#51cf66' },
+              { icon: 'briefcase-outline', label: 'Company Role', value: formatRawLabel(profile.role), color: '#7370FF' },
+              { icon: 'person-circle-outline', label: 'First Name', value: profile.firstName, color: '#f06595' },
+              { icon: 'person-circle-outline', label: 'Middle Name', value: profile.middleName, color: '#845ef7' },
+              { icon: 'person-circle-outline', label: 'Last Name', value: profile.lastName, color: '#15aabf' },
+              { icon: 'ribbon-outline', label: 'Suffix', value: profile.suffix, color: '#fab005' },
               { icon: 'location-outline', label: 'Address', value: profile.address, color: '#845ef7' },
             ].map((item, idx) => (
               <View key={idx} className="mb-6 w-1/2 pr-2">

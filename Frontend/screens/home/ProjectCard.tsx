@@ -2,12 +2,14 @@ import { View, Text, TouchableOpacity, Image, ImageSourcePropType, useWindowDime
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { softCardShadow } from '../../constants/theme';
+import { formatRawLabel } from '../../constants/constants';
 
 interface ProjectCardProps {
   name: string;
   location: string;
   color: string;
   progress?: number;
+  status?: string;
   daysLeft?: number;
   image?: ImageSourcePropType;
   onAction?: () => void;
@@ -18,6 +20,7 @@ export default function ProjectCard({
   location,
   color,
   progress = 0,
+  status = 'active',
   daysLeft,
   image,
   onAction,
@@ -27,6 +30,12 @@ export default function ProjectCard({
   // Use the color directly (it's a hex code) or fallback to pinkish default
   const bannerColor = color || '#FFDFF2';
   const bannerHeight = width >= 768 ? 220 : width <= 360 ? 150 : 180;
+  const normalizedProgress = Math.min(100, Math.max(0, Number(progress) || 0));
+  const statusKey = String(status || '').toLowerCase();
+  const isCompleted = statusKey.includes('completed');
+  const isProposed = statusKey.includes('proposed');
+  const accent = isCompleted ? '#2F9E44' : isProposed ? '#F08C00' : theme.primary;
+  const statusLabel = formatRawLabel(status, 'In Progress').replace(/^Active$/, 'In Progress');
 
   return (
     <View
@@ -45,6 +54,12 @@ export default function ProjectCard({
           />
         )}
         {/* 3-dot menu */}
+        <View
+          className="absolute left-3 top-3 flex-row items-center rounded-full border px-3 py-1"
+          style={{ backgroundColor: '#FFFFFF', borderColor: `${accent}55` }}>
+          <View className="mr-1.5 h-1.5 w-1.5 rounded-full" style={{ backgroundColor: accent }} />
+          <Text className="text-[10px] font-bold" style={{ color: accent }}>{statusLabel}</Text>
+        </View>
         {onAction ? (
           <TouchableOpacity 
             className="absolute right-3 top-3 h-6 w-6 items-center justify-center rounded-full bg-black/10" 
@@ -87,15 +102,16 @@ export default function ProjectCard({
 
         {/* Progress Section */}
         <View className="mt-2">
+          <View className="mb-1 flex-row items-center justify-between">
+            <Text className="text-[12px] font-semibold" style={{ color: theme.textMuted }}>Progress</Text>
+            <Text className="text-[12px] font-bold" style={{ color: accent }}>{normalizedProgress}%</Text>
+          </View>
           <View className="h-[6px] overflow-hidden rounded-full" style={{ backgroundColor: theme.border }}>
             <View
-              style={{ width: `${progress}%` }}
-              className={`h-full rounded-full ${progress > 0 ? 'bg-[#5DBF50]' : 'bg-[#F0F0F0]'}`}
+              style={{ width: `${normalizedProgress}%`, backgroundColor: normalizedProgress > 0 ? accent : 'transparent' }}
+              className="h-full rounded-full"
             />
           </View>
-          <Text className="mt-1 text-right text-[12px]" style={{ color: theme.textMuted }}>
-            {progress}%
-          </Text>
         </View>
       </View>
     </View>
