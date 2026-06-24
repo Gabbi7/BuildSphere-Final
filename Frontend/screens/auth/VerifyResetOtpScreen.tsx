@@ -12,7 +12,8 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { supabase } from '../../lib/supabase';
+import { API_URL } from '../../lib/api';
+import { shouldUseSupabaseAuth, supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface VerifyResetOtpScreenProps {
@@ -105,14 +106,27 @@ export default function VerifyResetOtpScreen({
     setMessage('');
 
     try {
-      const { error } = await supabase.auth.verifyOtp({
-        email: normalizedEmail,
-        token: cleanedOtp,
-        type: 'recovery',
-      });
-      console.log('verifyOtp recovery result:', error ? `error: ${error.message}` : 'success');
+      if (shouldUseSupabaseAuth) {
+        const { error } = await supabase.auth.verifyOtp({
+          email: normalizedEmail,
+          token: cleanedOtp,
+          type: 'recovery',
+        });
+        console.log('verifyOtp recovery result:', error ? `error: ${error.message}` : 'success');
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        const response = await fetch(`${API_URL}/auth/verify-otp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalizedEmail, otp: cleanedOtp }),
+        });
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          throw new Error(data?.error || 'Could not verify OTP. Please try again.');
+        }
+      }
 
       onVerified(cleanedOtp);
     } catch (error) {
@@ -135,10 +149,23 @@ export default function VerifyResetOtpScreen({
 
     try {
       console.log('Resend password reset normalized email:', normalizedEmail);
-      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail);
-      console.log('resend resetPasswordForEmail result:', error ? `error: ${error.message}` : 'success');
+      if (shouldUseSupabaseAuth) {
+        const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail);
+        console.log('resend resetPasswordForEmail result:', error ? `error: ${error.message}` : 'success');
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        const response = await fetch(`${API_URL}/auth/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalizedEmail }),
+        });
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          throw new Error(data?.error || 'Could not send OTP. Please try again.');
+        }
+      }
 
       setOtp('');
       setCooldown(RESEND_COOLDOWN_SECONDS);

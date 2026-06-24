@@ -12,7 +12,8 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { supabase } from '../../lib/supabase';
+import { API_URL } from '../../lib/api';
+import { shouldUseSupabaseAuth, supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface ForgotPasswordScreenProps {
@@ -83,10 +84,23 @@ export default function ForgotPasswordScreen({ onBackToLogin, onOtpSent }: Forgo
 
     try {
       console.log('Forgot password normalized email:', trimmedEmail);
-      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail);
-      console.log('resetPasswordForEmail result:', error ? `error: ${error.message}` : 'success');
+      if (shouldUseSupabaseAuth) {
+        const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail);
+        console.log('resetPasswordForEmail result:', error ? `error: ${error.message}` : 'success');
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        const response = await fetch(`${API_URL}/auth/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: trimmedEmail }),
+        });
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          throw new Error(data?.error || 'Could not send OTP. Please try again.');
+        }
+      }
 
       setMessage('If an account exists for this email, we sent a password reset code.');
       onOtpSent(trimmedEmail);

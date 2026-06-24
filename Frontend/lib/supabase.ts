@@ -7,6 +7,18 @@ const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey =
   process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || process.env.EXPO_PUBLIC_SUPABASE_KEY || '';
 
+const PLACEHOLDER_SUPABASE_KEY_PATTERN =
+  /^(your-supabase-anon-key|YOUR_SUPABASE_ANON_KEY|your_supabase_anon_key)$/i;
+
+export const hasValidSupabaseConfig =
+  Boolean(supabaseUrl.trim()) &&
+  Boolean(supabaseAnonKey.trim()) &&
+  !PLACEHOLDER_SUPABASE_KEY_PATTERN.test(supabaseAnonKey.trim());
+
+export const shouldUseSupabaseAuth =
+  hasValidSupabaseConfig &&
+  (process.env.EXPO_PUBLIC_AUTH_PROVIDER || '').trim().toLowerCase() === 'supabase';
+
 export function isInvalidRefreshTokenError(error: unknown) {
   const message =
     error instanceof Error

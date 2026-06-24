@@ -13,7 +13,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { clearInvalidSupabaseSession, isInvalidRefreshTokenError, supabase } from '../../lib/supabase';
+import { API_URL } from '../../lib/api';
+import {
+  clearInvalidSupabaseSession,
+  isInvalidRefreshTokenError,
+  shouldUseSupabaseAuth,
+  supabase,
+} from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface CreateNewPasswordScreenProps {
@@ -108,20 +114,33 @@ export default function CreateNewPasswordScreen({ email, otp, onBackToLogin }: C
     setSuccessMessage('');
 
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
-      console.log('updateUser password result:', error ? `error: ${error.message}` : 'success');
+      if (shouldUseSupabaseAuth) {
+        const { error } = await supabase.auth.updateUser({
+          password: newPassword,
+        });
+        console.log('updateUser password result:', error ? `error: ${error.message}` : 'success');
 
-      if (error) throw error;
+        if (error) throw error;
 
-      try {
-        await supabase.auth.signOut();
-      } catch (signOutError) {
-        if (isInvalidRefreshTokenError(signOutError)) {
-          await clearInvalidSupabaseSession();
-        } else {
-          console.warn('Supabase signout after password update failed:', signOutError);
+        try {
+          await supabase.auth.signOut();
+        } catch (signOutError) {
+          if (isInvalidRefreshTokenError(signOutError)) {
+            await clearInvalidSupabaseSession();
+          } else {
+            console.warn('Supabase signout after password update failed:', signOutError);
+          }
+        }
+      } else {
+        const response = await fetch(`${API_URL}/auth/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalizedEmail, otp, newPassword }),
+        });
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          throw new Error(data?.error || 'Could not update password. Please try again.');
         }
       }
 

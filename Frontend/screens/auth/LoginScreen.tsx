@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { API_URL, checkApiHealth, getApiConfigurationError } from '../../lib/api';
-import { supabase } from '../../lib/supabase';
+import { shouldUseSupabaseAuth, supabase } from '../../lib/supabase';
 import { UserInfo } from '../../App';
 import { useAppTheme } from '../../contexts/ThemeContext';
 
@@ -68,6 +68,12 @@ export default function LoginScreen({
 
         onLogin(profileData, authData.token);
       };
+
+      if (!shouldUseSupabaseAuth) {
+        console.log('Login method: backend auth login');
+        await loginWithBackend();
+        return;
+      }
 
       console.log('Login method: Supabase Auth signInWithPassword');
       console.log('Login normalized email:', trimmedEmail);
