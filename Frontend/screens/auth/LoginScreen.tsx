@@ -35,6 +35,8 @@ export default function LoginScreen({
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
+    if (loading) return;
+
     if (!email.trim() || !password.trim()) {
       Alert.alert('Missing info', 'Please enter your email and password.');
       return;
@@ -68,7 +70,6 @@ export default function LoginScreen({
         onLogin(profileData, authData.token);
       };
 
-      console.log('Login method: backend auth login');
       await loginWithBackend();
     } catch (err) {
       const message = err instanceof Error ? err.message : '';
