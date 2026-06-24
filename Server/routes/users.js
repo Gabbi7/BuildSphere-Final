@@ -251,17 +251,34 @@ router.patch('/:id/profile', async (req, res) => {
 
 // PATCH /users/:id/account  — update email and/or password
 router.patch('/:id/account', async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, currentPassword } = req.body;
   try {
+    const existingResult = await pool.query('SELECT email, password FROM users WHERE id = $1', [req.params.id]);
+    if (existingResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    const existingUser = existingResult.rows[0];
+    const nextEmail = email || existingUser.email;
+
     if (password) {
+      if (!currentPassword) {
+        return res.status(400).json({ error: 'Current password is required.' });
+      }
+
+      const valid = existingUser.password ? await bcrypt.compare(currentPassword, existingUser.password) : false;
+      if (!valid) {
+        return res.status(401).json({ error: 'Current password is incorrect.' });
+      }
+
       const hashed = await bcrypt.hash(password, 10);
-      await pool.query('UPDATE users SET email = $1, password_hash = $2 WHERE id = $3', [
-        email,
+      await pool.query('UPDATE users SET email = $1, password = $2 WHERE id = $3', [
+        nextEmail,
         hashed,
         req.params.id,
       ]);
     } else {
-      await pool.query('UPDATE users SET email = $1 WHERE id = $2', [email, req.params.id]);
+      await pool.query('UPDATE users SET email = $1 WHERE id = $2', [nextEmail, req.params.id]);
     }
     res.json({ success: true });
   } catch (err) {

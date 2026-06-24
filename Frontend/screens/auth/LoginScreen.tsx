@@ -60,14 +60,11 @@ export default function LoginScreen({
         if (!authRes.ok) {
           throw new Error(authData?.error || 'Invalid email or password.');
         }
-
-        const profileRes = await fetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`);
-        const profileData = await profileRes.json().catch(() => null);
-        if (!profileRes.ok) {
-          throw new Error(profileData?.error || 'No app profile is linked to this account.');
+        if (!authData?.token || !authData?.user) {
+          throw new Error('Login response is missing user data.');
         }
 
-        onLogin(profileData, authData.token);
+        onLogin(authData.user, authData.token);
       };
 
       await loginWithBackend();

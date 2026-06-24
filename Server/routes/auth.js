@@ -144,13 +144,14 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Email and password are required.' });
   }
   try {
-    const result = await pool.query('SELECT * FROM "public"."users" WHERE email = $1', [email]);
+    const result = await pool.query('SELECT * FROM "public"."users" WHERE LOWER(email) = LOWER($1)', [email]);
 
     if (result.rows.length === 0) {
       return res.status(401).json({ error: 'No account found with that email.' });
     }
     const user = result.rows[0];
-    const valid = await bcrypt.compare(password, user.password);
+    const passwordHash = user.password || user.password_hash;
+    const valid = passwordHash ? await bcrypt.compare(password, passwordHash) : false;
     if (!valid) {
       return res.status(401).json({ error: 'Incorrect password.' });
     }
@@ -160,8 +161,18 @@ router.post('/login', async (req, res) => {
       user: {
         id: user.id,
         firstName: user.first_name,
+        middleName: user.middle_name,
         lastName: user.last_name,
+        suffix: user.suffix,
         email: user.email,
+        phoneNumber: user.phone_number,
+        gender: user.gender,
+        birthdate: user.birthdate,
+        address: user.address,
+        department: user.department,
+        position: user.position,
+        accountStatus: user.account_status,
+        profilePictureUrl: user.profile_picture_url,
         role: user.role || 'staff',
       },
     });

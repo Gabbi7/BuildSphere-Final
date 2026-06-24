@@ -14,7 +14,12 @@ import type { UserRole } from './constants/roles';
 import * as Notifications from 'expo-notifications';
 import * as Linking from 'expo-linking';
 import { API_URL, loadStoredApiUrl } from './lib/api';
-import { clearInvalidSupabaseSession, isInvalidRefreshTokenError, supabase } from './lib/supabase';
+import {
+  clearInvalidSupabaseSession,
+  isInvalidRefreshTokenError,
+  shouldUseSupabaseAuth,
+  supabase,
+} from './lib/supabase';
 import { addNotificationListeners, registerForPushNotificationsAsync } from './lib/notifications';
 import { getDeepLinkParams, isResetPasswordUrl } from './lib/passwordRecovery';
 import { BuildSphereThemeProvider, useAppTheme } from './contexts/ThemeContext';
@@ -65,6 +70,16 @@ function AppContent() {
 
   const handleRecoveryUrl = useCallback(async (url: string) => {
     if (!isResetPasswordUrl(url)) return;
+
+    if (!shouldUseSupabaseAuth) {
+      await AsyncStorage.multiRemove(['user', 'token']);
+      setUser(null);
+      setAuthScreen('forgot');
+      setRecoveryLoading(false);
+      setRecoveryError('');
+      setAuthNotice('Please request a new OTP to reset your password.');
+      return;
+    }
 
     setAuthScreen('reset');
     setRecoveryLoading(true);
@@ -143,7 +158,9 @@ function AppContent() {
       try {
         await loadStoredApiUrl();
 
-        const { data, error } = await supabase.auth.getSession();
+        const { data, error } = shouldUseSupabaseAuth
+          ? await supabase.auth.getSession()
+          : { data: { session: null }, error: null };
 
         if (error) {
           if (isInvalidRefreshTokenError(error)) {
@@ -216,7 +233,9 @@ function AppContent() {
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut();
+      if (shouldUseSupabaseAuth) {
+        await supabase.auth.signOut();
+      }
     } catch (error) {
       if (isInvalidRefreshTokenError(error)) {
         await clearInvalidSupabaseSession();
@@ -230,7 +249,9 @@ function AppContent() {
 
   const handleBackToLogin = async () => {
     try {
-      await supabase.auth.signOut();
+      if (shouldUseSupabaseAuth) {
+        await supabase.auth.signOut();
+      }
     } catch (error) {
       if (isInvalidRefreshTokenError(error)) {
         await clearInvalidSupabaseSession();
@@ -278,6 +299,8 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
+    if (!shouldUseSupabaseAuth) return undefined;
+
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
         setUser(null);

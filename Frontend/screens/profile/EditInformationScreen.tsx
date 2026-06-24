@@ -18,7 +18,6 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
-import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { formatRawLabel } from '../../constants/constants';
 import { formatDateOnlyDisplay, normalizeDateOnlyString, parseDateOnly, toDateOnlyString } from '../../utils/dateOnly';
@@ -164,24 +163,18 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
           setSaving(false);
           return;
         }
-        const { data: sessionData } = await supabase.auth.getSession();
-        if (!sessionData.session) {
-          Alert.alert('Session expired', 'Your session has expired. Please log in again.');
-          setSaving(false);
-          return;
-        }
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: user.email,
-          password: currentPassword,
+        const passwordRes = await fetch(`${API_URL}/users/${user.id}/account`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: user.email,
+            currentPassword,
+            password: newPassword,
+          }),
         });
-        if (signInError) {
-          Alert.alert('Password update failed', signInError.message);
-          setSaving(false);
-          return;
-        }
-        const { error: passwordError } = await supabase.auth.updateUser({ password: newPassword });
-        if (passwordError) {
-          Alert.alert('Password update failed', passwordError.message);
+        const passwordData = await passwordRes.json().catch(() => null);
+        if (!passwordRes.ok) {
+          Alert.alert('Password update failed', passwordData?.error || 'Could not update password.');
           setSaving(false);
           return;
         }
